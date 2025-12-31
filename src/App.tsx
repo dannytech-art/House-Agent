@@ -172,10 +172,16 @@ function AppContent() {
       case 'search':
         return <SearchResultsPage properties={results.length > 0 ? results : mockProperties} onBack={() => setCurrentPage(isAuthenticated ? 'dashboard' : 'landing')} onPropertyClick={handlePropertyClick} onSaveProperty={handleSaveProperty} />;
       case 'property-details':
-        return selectedProperty ? <PropertyDetailsPage property={selectedProperty} onBack={() => setCurrentPage('search')} onExpressInterest={() => {
-          alert('Interest expressed! Agent will contact you soon.');
-          setCurrentPage('search');
-        }} /> : null;
+        return selectedProperty ? <PropertyDetailsPage 
+          property={selectedProperty} 
+          onBack={() => setCurrentPage('search')} 
+          onExpressInterest={() => {
+            // Interest successfully expressed
+          }}
+          onLoginRequired={() => {
+            setShowLoginModal(true);
+          }}
+        /> : null;
       case 'public-agent-profile':
         return viewingAgentId ? <PublicAgentProfilePage agentId={viewingAgentId} onBack={() => setCurrentPage(isAuthenticated ? 'dashboard' : 'landing')} onExpressInterest={handleExpressInterestFromPublicProfile} /> : null;
       case 'marketplace':
@@ -206,7 +212,7 @@ function AppContent() {
       case 'profile':
         return <ProfilePage />;
       case 'my-listings':
-        return <MyListingsPage />;
+        return <MyListingsPage onNavigate={handleNavigate} />;
       case 'territories':
         return <TerritoriesPage />;
       case 'kyc-onboarding':

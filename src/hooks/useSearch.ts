@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Property, PropertyType } from '../types';
-import { mockProperties } from '../utils/mockData';
+import apiClient from '../lib/api-client';
+
 export interface SearchFilters {
   minPrice?: number;
   maxPrice?: number;
@@ -10,6 +11,7 @@ export interface SearchFilters {
   location?: string;
   amenities?: string[];
 }
+
 export function useSearch() {
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState<SearchFilters>({
@@ -26,6 +28,7 @@ export function useSearch() {
       setRecentSearches(JSON.parse(saved));
     }
   }, []);
+
   const parseQuery = (input: string): Partial<SearchFilters> => {
     const parsed: Partial<SearchFilters> = {};
     const lowerInput = input.toLowerCase();
@@ -44,6 +47,7 @@ export function useSearch() {
     if (lowerInput.includes('ajah')) parsed.location = 'Ajah';
     return parsed;
   };
+
   const search = useCallback(async (searchQuery: string, activeFilters: SearchFilters = filters) => {
     setIsSearching(true);
     setQuery(searchQuery);
@@ -57,34 +61,71 @@ export function useSearch() {
       });
     }
 
-    // Simulate API delay
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    const parsedQuery = parseQuery(searchQuery);
-    const effectiveFilters = {
-      ...activeFilters,
-      ...parsedQuery
-    };
-    const filtered = mockProperties.filter(property => {
-      // Text match
-      if (searchQuery && !property.title.toLowerCase().includes(searchQuery.toLowerCase()) && !property.location.toLowerCase().includes(searchQuery.toLowerCase())) {
-        return false;
+    try {
+      const parsedQuery = parseQuery(searchQuery);
+      const effectiveFilters = {
+        ...activeFilters,
+        ...parsedQuery
+      };
+
+      // Build API params
+      const params: Record<string, any> = {};
+      
+      if (effectiveFilters.location) {
+        params.location = effectiveFilters.location;
+      }
+      if (effectiveFilters.propertyType && effectiveFilters.propertyType !== 'all') {
+        params.type = effectiveFilters.propertyType;
+      }
+      if (effectiveFilters.minPrice) {
+        params.minPrice = effectiveFilters.minPrice;
+      }
+      if (effectiveFilters.maxPrice) {
+        params.maxPrice = effectiveFilters.maxPrice;
       }
 
-      // Filter matches
-      if (effectiveFilters.propertyType !== 'all' && effectiveFilters.propertyType && property.type !== effectiveFilters.propertyType) return false;
-      if (effectiveFilters.minPrice && property.price < effectiveFilters.minPrice) return false;
-      if (effectiveFilters.maxPrice && property.price > effectiveFilters.maxPrice) return false;
-      if (effectiveFilters.bedrooms && (property.bedrooms || 0) < effectiveFilters.bedrooms) return false;
-      if (effectiveFilters.location && !property.location.toLowerCase().includes(effectiveFilters.location.toLowerCase())) return false;
-      return true;
-    });
-    setResults(filtered);
-    setIsSearching(false);
+      // Fetch from API
+      const properties = await apiClient.getProperties(params);
+      
+      // Additional client-side filtering if needed
+      let filtered = Array.isArray(properties) ? properties : [];
+      
+      // Text match (client-side for now)
+      if (searchQuery) {
+        filtered = filtered.filter(property => 
+          property.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          property.location?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          property.description?.toLowerCase().includes(searchQuery.toLowerCase())
+        );
+      }
+
+      // Bedrooms filter (client-side)
+      if (effectiveFilters.bedrooms) {
+        filtered = filtered.filter(property => 
+          (property.bedrooms || 0) >= effectiveFilters.bedrooms!
+        );
+      }
+
+      setResults(filtered);
+    } catch (error) {
+      console.error('Search error:', error);
+      // Set empty results on error
+      setResults([]);
+    } finally {
+      setIsSearching(false);
+    }
   }, [filters]);
+
+  // Load all properties on initial mount
+  useEffect(() => {
+    search('');
+  }, []);
+
   const clearHistory = () => {
     setRecentSearches([]);
     localStorage.removeItem('vilanow_recent_searches');
   };
+
   return {
     query,
     filters,

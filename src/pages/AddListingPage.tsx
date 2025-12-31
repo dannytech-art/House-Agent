@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Upload, MapPin, Home, DollarSign, Image, CheckCircle } from 'lucide-react';
+import { Upload, MapPin, Home, DollarSign, Image, CheckCircle, X, Loader2, Video } from 'lucide-react';
 import { DuplicateListingModal } from '../components/DuplicateListingModal';
 import { ChatInterface } from '../components/ChatInterface';
 import { PropertyType, DirectAgentContact } from '../types';
 import { mockAgent } from '../utils/mockData';
+import apiClient from '../lib/api-client';
+
 export function AddListingPage() {
   const [step, setStep] = useState(1);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
@@ -31,68 +33,175 @@ export function AddListingPage() {
     amenities: [] as string[],
     agentType: 'semi-direct' as 'direct' | 'semi-direct'
   });
+  
+  // File upload state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadedImages, setUploadedImages] = useState<string[]>([]);
+  const [uploadedVideos, setUploadedVideos] = useState<string[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  
   const locations = ['Ikate', 'Lekki', 'Ajah', 'Victoria Island'];
   const propertyTypes: PropertyType[] = ['apartment', 'house', 'duplex', 'penthouse', 'studio', 'land'];
   const amenitiesList = ['Pool', 'Gym', '24/7 Security', 'Parking', 'Generator', 'BQ', 'Garden', 'Smart Home'];
+  
   const handleNext = () => {
     if (step < 4) setStep(step + 1);
   };
+  
   const handleBack = () => {
     if (step > 1) setStep(step - 1);
   };
-  const handleSubmit = async () => {
-    try {
-      // Show duplicate modal for Ikate and Lekki locations with semi-direct agents
-      if (formData.agentType === 'semi-direct' && (formData.location === 'Ikate' || formData.location === 'Lekki')) {
-        setShowDuplicateModal(true);
-      } else {
-        // Create property via API
-        const response = await fetch('/api/properties', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${localStorage.getItem('vilanow_token')}`,
-          },
-          body: JSON.stringify({
-            title: formData.title,
-            type: formData.type,
-            price: parseFloat(formData.price),
-            location: formData.location,
-            area: formData.location, // Using location as area for now
-            bedrooms: parseInt(formData.bedrooms) || null,
-            bathrooms: parseInt(formData.bathrooms) || null,
-            description: formData.description,
-            amenities: formData.amenities,
-            images: [],
-            videos: [],
-          }),
-        });
+  
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-        const data = await response.json();
-        
-        if (data.success) {
-          alert('Listing created successfully!');
-          setStep(1);
-          setFormData({
-            location: '',
-            type: '',
-            title: '',
-            price: '',
-            bedrooms: '',
-            bathrooms: '',
-            description: '',
-            amenities: [],
-            agentType: 'semi-direct'
-          });
-        } else {
-          alert(`Error: ${data.error || 'Failed to create listing'}`);
-        }
+  // Handle file selection and upload
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploading(true);
+    setUploadError(null);
+
+    try {
+      const fileArray = Array.from(files);
+      
+      // Validate file types and sizes
+      const validFiles = fileArray.filter(file => {
+        const isValidType = file.type.startsWith('image/') || file.type.startsWith('video/');
+        const isValidSize = file.size <= 10 * 1024 * 1024; // 10MB max
+        return isValidType && isValidSize;
+      });
+
+      if (validFiles.length === 0) {
+        setUploadError('Please select valid image or video files (max 10MB each)');
+        setIsUploading(false);
+        return;
       }
+
+      // Create local preview URLs immediately for better UX
+      const newImages: string[] = [];
+      const newVideos: string[] = [];
+
+      validFiles.forEach(file => {
+        const url = URL.createObjectURL(file);
+        if (file.type.startsWith('video/')) {
+          newVideos.push(url);
+        } else {
+          newImages.push(url);
+        }
+      });
+
+      // Add local previews immediately
+      setUploadedImages(prev => [...prev, ...newImages]);
+      setUploadedVideos(prev => [...prev, ...newVideos]);
+
+      // Try to upload to server in background (optional - for when backend is configured)
+      try {
+        const result = await apiClient.uploadPropertyMedia(validFiles);
+        
+        // If server upload succeeded, replace local URLs with server URLs
+        if (result.images && result.images.length > 0) {
+          // Replace the last N images with server URLs
+          setUploadedImages(prev => {
+            const prevWithoutNew = prev.slice(0, prev.length - newImages.length);
+            return [...prevWithoutNew, ...result.images];
+          });
+        }
+        if (result.videos && result.videos.length > 0) {
+          setUploadedVideos(prev => {
+            const prevWithoutNew = prev.slice(0, prev.length - newVideos.length);
+            return [...prevWithoutNew, ...result.videos];
+          });
+        }
+        
+        console.log('Files uploaded to server:', result);
+      } catch (uploadErr) {
+        // Server upload failed, but local previews are already shown
+        console.log('Server upload not available, using local previews:', uploadErr);
+      }
+
     } catch (error) {
-      console.error('Error creating listing:', error);
-      alert('Failed to create listing. Please try again.');
+      console.error('Error processing files:', error);
+      setUploadError('Failed to process files. Please try again.');
+    } finally {
+      setIsUploading(false);
+      // Reset file input
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     }
   };
+
+  const removeImage = (index: number) => {
+    setUploadedImages(prev => {
+      const newImages = [...prev];
+      URL.revokeObjectURL(newImages[index]);
+      newImages.splice(index, 1);
+      return newImages;
+    });
+  };
+
+  const removeVideo = (index: number) => {
+    setUploadedVideos(prev => {
+      const newVideos = [...prev];
+      URL.revokeObjectURL(newVideos[index]);
+      newVideos.splice(index, 1);
+      return newVideos;
+    });
+  };
+
+  const handleSubmit = async () => {
+    // Show duplicate modal for Ikate and Lekki locations with semi-direct agents
+    if (formData.agentType === 'semi-direct' && (formData.location === 'Ikate' || formData.location === 'Lekki')) {
+      setShowDuplicateModal(true);
+      return;
+    }
+
+    setIsSubmitting(true);
+    try {
+      // Create property via apiClient (connects to backend at localhost:3000)
+      await apiClient.createProperty({
+        title: formData.title,
+        type: formData.type,
+        price: parseFloat(formData.price),
+        location: formData.location,
+        area: formData.location,
+        bedrooms: parseInt(formData.bedrooms) || undefined,
+        bathrooms: parseInt(formData.bathrooms) || undefined,
+        description: formData.description,
+        amenities: formData.amenities,
+        agentType: formData.agentType,
+        images: uploadedImages,
+        videos: uploadedVideos,
+      });
+      
+      alert('Listing created successfully!');
+      
+      // Reset form
+      setStep(1);
+      setFormData({
+        location: '',
+        type: '',
+        title: '',
+        price: '',
+        bedrooms: '',
+        bathrooms: '',
+        description: '',
+        amenities: [],
+        agentType: 'semi-direct'
+      });
+      setUploadedImages([]);
+      setUploadedVideos([]);
+    } catch (error) {
+      console.error('Error creating listing:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to create listing';
+      alert(`Error: ${errorMessage}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const handleUnlockDirectAgent = () => {
     const currentCredits = mockAgent.credits;
     const unlockCost = 50;
@@ -104,16 +213,19 @@ export function AddListingPage() {
       alert(`Direct agent contact unlocked!\n\n${unlockCost} credits deducted from your account.`);
     }
   };
+
   const handleStartChatWithDirectAgent = () => {
     setShowDuplicateModal(false);
     setChatOpen(true);
   };
+
   const toggleAmenity = (amenity: string) => {
     setFormData(prev => ({
       ...prev,
       amenities: prev.amenities.includes(amenity) ? prev.amenities.filter(a => a !== amenity) : [...prev.amenities, amenity]
     }));
   };
+
   const steps = [{
     number: 1,
     title: 'Location & Type',
@@ -131,6 +243,7 @@ export function AddListingPage() {
     title: 'Review',
     icon: CheckCircle
   }];
+
   return <>
       <div className="min-h-screen bg-bg-secondary pb-20">
         <div className="max-w-2xl mx-auto px-4 py-6">
@@ -319,18 +432,109 @@ export function AddListingPage() {
                 <h2 className="font-display text-xl font-bold text-text-primary mb-4">
                   Upload Media
                 </h2>
-                <div className="border-2 border-dashed border-border-color rounded-xl p-12 text-center hover:border-primary transition-colors">
-                  <Upload className="w-12 h-12 text-text-tertiary mx-auto mb-4" />
-                  <p className="font-medium text-text-primary mb-2">
-                    Upload photos and videos
-                  </p>
-                  <p className="text-sm text-text-tertiary mb-4">
-                    Drag and drop or click to browse
-                  </p>
-                  <button className="px-6 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg font-medium transition-colors">
-                    Choose Files
-                  </button>
+                
+                {/* Hidden file input */}
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept="image/*,video/*"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
+                
+                {/* Upload area */}
+                <div 
+                  onClick={() => !isUploading && fileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-xl p-8 text-center transition-colors cursor-pointer ${
+                    isUploading ? 'border-primary/50 bg-primary/5' : 'border-border-color hover:border-primary'
+                  }`}
+                >
+                  {isUploading ? (
+                    <>
+                      <Loader2 className="w-12 h-12 text-primary mx-auto mb-4 animate-spin" />
+                      <p className="font-medium text-text-primary mb-2">
+                        Uploading files...
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="w-12 h-12 text-text-tertiary mx-auto mb-4" />
+                      <p className="font-medium text-text-primary mb-2">
+                        Upload photos and videos
+                      </p>
+                      <p className="text-sm text-text-tertiary mb-4">
+                        Click to browse or drag and drop
+                      </p>
+                      <button 
+                        type="button"
+                        className="px-6 py-2 bg-primary hover:bg-primary/90 text-white rounded-lg font-medium transition-colors"
+                      >
+                        Choose Files
+                      </button>
+                    </>
+                  )}
                 </div>
+
+                {/* Error message */}
+                {uploadError && (
+                  <p className="text-sm text-danger mt-2">{uploadError}</p>
+                )}
+
+                {/* Uploaded Images Preview */}
+                {uploadedImages.length > 0 && (
+                  <div className="mt-6">
+                    <h3 className="text-sm font-medium text-text-secondary mb-3 flex items-center gap-2">
+                      <Image className="w-4 h-4" />
+                      Images ({uploadedImages.length})
+                    </h3>
+                    <div className="grid grid-cols-3 gap-3">
+                      {uploadedImages.map((url, index) => (
+                        <div key={index} className="relative aspect-square rounded-lg overflow-hidden group">
+                          <img 
+                            src={url} 
+                            alt={`Upload ${index + 1}`} 
+                            className="w-full h-full object-cover"
+                          />
+                          <button
+                            onClick={() => removeImage(index)}
+                            className="absolute top-2 right-2 p-1 bg-danger text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Uploaded Videos Preview */}
+                {uploadedVideos.length > 0 && (
+                  <div className="mt-6">
+                    <h3 className="text-sm font-medium text-text-secondary mb-3 flex items-center gap-2">
+                      <Video className="w-4 h-4" />
+                      Videos ({uploadedVideos.length})
+                    </h3>
+                    <div className="grid grid-cols-2 gap-3">
+                      {uploadedVideos.map((url, index) => (
+                        <div key={index} className="relative aspect-video rounded-lg overflow-hidden group">
+                          <video 
+                            src={url} 
+                            className="w-full h-full object-cover"
+                            controls
+                          />
+                          <button
+                            onClick={() => removeVideo(index)}
+                            className="absolute top-2 right-2 p-1 bg-danger text-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
                 <p className="text-xs text-text-tertiary mt-4 text-center">
                   Supported formats: JPG, PNG, MP4. Max size: 10MB per file
                 </p>
@@ -376,6 +580,12 @@ export function AddListingPage() {
                       {formData.agentType === 'direct' ? 'Direct Agent' : 'Semi-Direct Agent'}
                     </p>
                   </div>
+                  <div className="p-4 bg-bg-secondary rounded-xl">
+                    <p className="text-sm text-text-tertiary mb-1">Media</p>
+                    <p className="font-semibold text-text-primary">
+                      {uploadedImages.length} images, {uploadedVideos.length} videos
+                    </p>
+                  </div>
                 </div>
 
                 {/* Warning for Ikate/Lekki + Semi-Direct */}
@@ -404,11 +614,11 @@ export function AddListingPage() {
 
           {/* Navigation Buttons */}
           <div className="flex gap-4">
-            {step > 1 && <button onClick={handleBack} className="flex-1 px-6 py-3 bg-bg-primary hover:bg-bg-tertiary border border-border-color text-text-primary rounded-xl font-medium transition-colors">
+            {step > 1 && <button onClick={handleBack} disabled={isSubmitting} className="flex-1 px-6 py-3 bg-bg-primary hover:bg-bg-tertiary border border-border-color text-text-primary rounded-xl font-medium transition-colors disabled:opacity-50">
                 Back
               </button>}
-            <button onClick={step === 4 ? handleSubmit : handleNext} disabled={step === 1 && (!formData.location || !formData.type)} className="flex-1 px-6 py-3 bg-primary hover:bg-primary/90 text-white rounded-xl font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-              {step === 4 ? 'Submit Listing' : 'Continue'}
+            <button onClick={step === 4 ? handleSubmit : handleNext} disabled={(step === 1 && (!formData.location || !formData.type)) || isSubmitting} className="flex-1 px-6 py-3 bg-primary hover:bg-primary/90 text-white rounded-xl font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+              {isSubmitting ? 'Submitting...' : step === 4 ? 'Submit Listing' : 'Continue'}
             </button>
           </div>
         </div>

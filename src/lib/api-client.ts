@@ -1,10 +1,24 @@
 // API Client for frontend
-// This will make calls to the Vercel API routes
+// Connects to the Express backend server
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
+// Default to localhost:3000 for development
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean>;
+}
+
+interface ApiResponse<T = any> {
+  success: boolean;
+  data?: T;
+  error?: string;
+  message?: string;
+  pagination?: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
 }
 
 class ApiClient {
@@ -28,6 +42,10 @@ class ApiClient {
     }
   }
 
+  getToken(): string | null {
+    return this.token;
+  }
+
   private async request<T>(
     endpoint: string,
     options: RequestOptions = {}
@@ -40,9 +58,14 @@ class ApiClient {
     if (params) {
       const searchParams = new URLSearchParams();
       Object.entries(params).forEach(([key, value]) => {
-        searchParams.append(key, String(value));
+        if (value !== undefined && value !== null) {
+          searchParams.append(key, String(value));
+        }
       });
-      url += `?${searchParams.toString()}`;
+      const queryString = searchParams.toString();
+      if (queryString) {
+        url += `?${queryString}`;
+      }
     }
 
     // Add auth header
@@ -61,15 +84,86 @@ class ApiClient {
         headers,
       });
 
-      const data = await response.json();
+      const data: ApiResponse<T> = await response.json();
 
       if (!response.ok) {
         throw new Error(data.error || `HTTP error! status: ${response.status}`);
       }
 
-      return data.data || data;
+      return data.data !== undefined ? data.data : (data as unknown as T);
     } catch (error) {
       console.error('API Request failed:', error);
+      throw error;
+    }
+  }
+
+  // File upload method using FormData
+  async uploadFiles(files: File[], type: 'image' | 'video' | 'document' = 'image'): Promise<{ urls: string[] }> {
+    const formData = new FormData();
+    files.forEach((file) => {
+      formData.append('files', file);
+    });
+    formData.append('type', type);
+
+    const headers: HeadersInit = {};
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+    // Don't set Content-Type - let browser set it with boundary for FormData
+
+    try {
+      const response = await fetch(`${this.baseUrl}/upload`, {
+        method: 'POST',
+        headers,
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || `Upload failed: ${response.status}`);
+      }
+
+      return data.data || { urls: [] };
+    } catch (error) {
+      console.error('File upload failed:', error);
+      throw error;
+    }
+  }
+
+  // Upload property media (images and videos)
+  async uploadPropertyMedia(files: File[]): Promise<{ images: string[]; videos: string[] }> {
+    const formData = new FormData();
+
+    files.forEach((file) => {
+      formData.append('files', file);
+    });
+
+    const headers: HeadersInit = {};
+    if (this.token) {
+      headers['Authorization'] = `Bearer ${this.token}`;
+    }
+
+    try {
+      const response = await fetch(`${this.baseUrl}/upload/property-media`, {
+        method: 'POST',
+        headers,
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || `Upload failed: ${response.status}`);
+      }
+
+      // Backend returns { images: string[], videos: string[] } format
+      return {
+        images: data.data?.images || [],
+        videos: data.data?.videos || [],
+      };
+    } catch (error) {
+      console.error('Property media upload failed:', error);
       throw error;
     }
   }
@@ -83,14 +177,14 @@ class ApiClient {
     role: 'seeker' | 'agent' | 'admin';
     agentType?: 'direct' | 'semi-direct';
   }) {
-    return this.request('/auth/register', {
+    return this.request<{ user: any; token: string }>('/auth/register', {
       method: 'POST',
       body: JSON.stringify(userData),
     });
   }
 
   async login(email: string, password: string) {
-    const response = await this.request<{ user: any; token: string; session: any }>('/auth/login', {
+    const response = await this.request<{ user: any; token: string }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
@@ -103,6 +197,11 @@ class ApiClient {
   }
 
   async logout() {
+    try {
+      await this.request('/auth/logout', { method: 'POST' });
+    } catch {
+      // Ignore errors during logout
+    }
     this.setToken(null);
   }
 
@@ -135,7 +234,7 @@ class ApiClient {
     page?: number;
     limit?: number;
   }) {
-    return this.request('/properties', {
+    return this.request<any[]>('/properties', {
       method: 'GET',
       params: params as any,
     });
@@ -163,6 +262,10 @@ class ApiClient {
     return this.request(`/properties/${id}`, {
       method: 'DELETE',
     });
+  }
+
+  async getMyListings() {
+    return this.request<any[]>('/properties/my/listings');
   }
 
   // Interest endpoints
@@ -194,6 +297,102 @@ class ApiClient {
     });
   }
 
+  async unlockInterest(id: string) {
+    return this.request(`/interests/${id}/unlock`, {
+      method: 'POST',
+    });
+  }
+
+  // Agent - Get all seekers who expressed interest
+  async getAgentSeekers(params?: {
+    propertyId?: string;
+    status?: 'pending' | 'contacted' | 'viewing-scheduled' | 'closed';
+  }) {
+    return this.request<{
+      data: any[];
+      summary: {
+        total: number;
+        pending: number;
+        contacted: number;
+        viewingScheduled: number;
+        closed: number;
+      };
+    }>('/interests/agent/seekers', {
+      method: 'GET',
+      params: params as any,
+    });
+  }
+
+  // Get seekers for specific property
+  async getPropertySeekers(propertyId: string) {
+    return this.request<{
+      data: any[];
+      property: any;
+    }>(`/interests/property/${propertyId}`, {
+      method: 'GET',
+    });
+  }
+
+  // Get my expressed interests (for seekers)
+  async getMyInterests() {
+    return this.request<any[]>('/interests/my');
+  }
+
+  // Get chat for specific interest
+  async getInterestChat(interestId: string) {
+    return this.request(`/interests/${interestId}/chat`);
+  }
+
+  // Inspection endpoints
+  async scheduleInspection(inspectionData: {
+    interestId: string;
+    scheduledDate: string;
+    scheduledTime: string;
+    notes?: string;
+  }) {
+    return this.request('/inspections', {
+      method: 'POST',
+      body: JSON.stringify(inspectionData),
+    });
+  }
+
+  async getMyInspections() {
+    return this.request<any[]>('/inspections/my');
+  }
+
+  async getAgentInspections(params?: {
+    status?: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+    upcoming?: boolean;
+  }) {
+    return this.request<any[]>('/inspections/agent', {
+      method: 'GET',
+      params: params as any,
+    });
+  }
+
+  async getPropertyInspections(propertyId: string) {
+    return this.request<any[]>(`/inspections/property/${propertyId}`);
+  }
+
+  async updateInspection(id: string, data: {
+    scheduledDate?: string;
+    scheduledTime?: string;
+    notes?: string;
+    status?: 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'rescheduled';
+    agentNotes?: string;
+  }) {
+    return this.request(`/inspections/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async cancelInspection(id: string) {
+    return this.request(`/inspections/${id}`, {
+      method: 'DELETE',
+    });
+  }
+
   // Chat endpoints
   async getChatSessions() {
     return this.request('/chats');
@@ -210,6 +409,13 @@ class ApiClient {
     });
   }
 
+  async createChatSession(participantId: string, propertyId?: string, initialMessage?: string) {
+    return this.request('/chats', {
+      method: 'POST',
+      body: JSON.stringify({ participantId, propertyId, initialMessage }),
+    });
+  }
+
   // Credits endpoints
   async getCreditBundles() {
     return this.request('/credits/bundles');
@@ -219,10 +425,10 @@ class ApiClient {
     return this.request('/credits/balance');
   }
 
-  async purchaseCredits(bundleId: string) {
+  async purchaseCredits(bundleId: string, paymentReference?: string) {
     return this.request('/credits/purchase', {
       method: 'POST',
-      body: JSON.stringify({ bundleId }),
+      body: JSON.stringify({ bundleId, paymentReference }),
     });
   }
 
@@ -230,11 +436,28 @@ class ApiClient {
     return this.request('/credits/transactions');
   }
 
+  async loadWallet(amount: number) {
+    return this.request('/credits/wallet/load', {
+      method: 'POST',
+      body: JSON.stringify({ amount }),
+    });
+  }
+
   // Territories endpoints
   async claimTerritory(area: string, cost: number, state?: string, dailyIncome?: number) {
     return this.request('/territories/claim', {
       method: 'POST',
       body: JSON.stringify({ area, cost, state, dailyIncome }),
+    });
+  }
+
+  async getMyTerritories() {
+    return this.request('/territories/my');
+  }
+
+  async getTerritories(params?: { area?: string; agentId?: string }) {
+    return this.request('/territories', {
+      params: params as any,
     });
   }
 
@@ -268,7 +491,7 @@ class ApiClient {
     });
   }
 
-  // Phase 6: Gamification
+  // Gamification
   async getChallenges(params?: { agentId?: string; completed?: boolean }) {
     return this.request('/gamification/challenges', {
       params: params as any,
@@ -307,13 +530,13 @@ class ApiClient {
     });
   }
 
-  async getTerritories(params?: { agentId?: string; area?: string }) {
+  async getGamificationTerritories(params?: { agentId?: string; area?: string }) {
     return this.request('/gamification/territories', {
       params: params as any,
     });
   }
 
-  // Phase 7: Marketplace
+  // Marketplace
   async getMarketplaceOffers(params?: { agentId?: string; type?: string; status?: string }) {
     return this.request('/marketplace/offers', {
       params: params as any,
@@ -340,7 +563,7 @@ class ApiClient {
     });
   }
 
-  // Phase 8: Groups
+  // Groups
   async getGroups() {
     return this.request('/groups');
   }
@@ -363,7 +586,14 @@ class ApiClient {
     });
   }
 
-  // Phase 9: Admin
+  async addGroupMember(groupId: string, userId: string) {
+    return this.request(`/groups/${groupId}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ userId }),
+    });
+  }
+
+  // Admin
   async getPendingKYC() {
     return this.request('/admin/kyc/review');
   }
@@ -372,6 +602,13 @@ class ApiClient {
     return this.request('/admin/kyc/review', {
       method: 'POST',
       body: JSON.stringify({ agentId, status, notes }),
+    });
+  }
+
+  async submitKYC(documents: any) {
+    return this.request('/admin/kyc/submit', {
+      method: 'POST',
+      body: JSON.stringify({ documents }),
     });
   }
 
@@ -407,7 +644,11 @@ class ApiClient {
     });
   }
 
-  // Phase 10: Analytics
+  async getAdminStats() {
+    return this.request('/admin/stats');
+  }
+
+  // Analytics
   async getReports() {
     return this.request('/analytics/reports');
   }
@@ -436,7 +677,7 @@ class ApiClient {
     });
   }
 
-  // Phase 11: Notifications
+  // Notifications
   async getNotifications(params?: { read?: boolean; type?: string }) {
     return this.request('/notifications', {
       params: params as any,
@@ -488,7 +729,7 @@ class ApiClient {
     });
   }
 
-  // Phase 12: Territories & Locations
+  // Locations
   async getLocations(params?: { area?: string; state?: string; search?: string }) {
     return this.request('/territories/locations', {
       params: params as any,
@@ -525,8 +766,7 @@ class ApiClient {
     });
   }
 
-  // Phase 13-14: CIU System
-  // Closable Deals
+  // CIU System
   async getClosableDeals(params?: { status?: string; urgency?: string; assignedTo?: string }) {
     return this.request('/ciu/deals', {
       params: params as any,
@@ -553,7 +793,6 @@ class ApiClient {
     });
   }
 
-  // Vilanow Tasks
   async getVilanowTasks(params?: { status?: string; priority?: string; assignedAgent?: string }) {
     return this.request('/ciu/tasks', {
       params: params as any,
@@ -580,7 +819,6 @@ class ApiClient {
     });
   }
 
-  // Risk Flags
   async getRiskFlags(params?: { type?: string; severity?: string; status?: string }) {
     return this.request('/ciu/risks', {
       params: params as any,
@@ -608,7 +846,6 @@ class ApiClient {
     });
   }
 
-  // Automation Rules
   async getAutomationRules(params?: { enabled?: boolean }) {
     return this.request('/ciu/automation', {
       params: params as any,
@@ -646,4 +883,3 @@ class ApiClient {
 export const apiClient = new ApiClient();
 export { ApiClient };
 export default apiClient;
-

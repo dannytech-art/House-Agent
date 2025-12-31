@@ -1,19 +1,130 @@
 import React, { useState } from 'react';
 import { motion } from 'framer-motion';
-import { ArrowLeft, MapPin, Bed, Bath, Square, Heart, Share2, Calendar, CheckCircle, Star } from 'lucide-react';
+import { ArrowLeft, MapPin, Bed, Bath, Square, Heart, Share2, Calendar, CheckCircle, Star, MessageSquare, Loader2, Clock, ChevronLeft, ChevronRight, X, LogIn } from 'lucide-react';
 import { Property } from '../types';
+import apiClient from '../lib/api-client';
+
 interface PropertyDetailsPageProps {
   property: Property;
   onBack: () => void;
   onExpressInterest: () => void;
+  onLoginRequired?: () => void;
 }
+
 export function PropertyDetailsPage({
   property,
   onBack,
-  onExpressInterest
+  onExpressInterest,
+  onLoginRequired
 }: PropertyDetailsPageProps) {
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isSaved, setIsSaved] = useState(false);
+  const [showInterestModal, setShowInterestModal] = useState(false);
+  const [showLoginPrompt, setShowLoginPrompt] = useState(false);
+  const [interestMessage, setInterestMessage] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [interestId, setInterestId] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  
+  // Check if user is authenticated
+  const isAuthenticated = !!apiClient.getToken();
+  
+  // Calendar state
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [selectedTime, setSelectedTime] = useState<string>('');
+  const [inspectionNotes, setInspectionNotes] = useState('');
+
+  // Available time slots
+  const timeSlots = [
+    '09:00', '09:30', '10:00', '10:30', '11:00', '11:30',
+    '12:00', '12:30', '14:00', '14:30', '15:00', '15:30',
+    '16:00', '16:30', '17:00'
+  ];
+
+  // Get days in month
+  const getDaysInMonth = (date: Date) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+    const daysInMonth = lastDay.getDate();
+    const startingDay = firstDay.getDay();
+
+    const days: (Date | null)[] = [];
+    
+    for (let i = 0; i < startingDay; i++) {
+      days.push(null);
+    }
+    
+    for (let i = 1; i <= daysInMonth; i++) {
+      days.push(new Date(year, month, i));
+    }
+    
+    return days;
+  };
+
+  const days = getDaysInMonth(currentMonth);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const monthNames = [
+    'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  const dayNames = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+  const isDateDisabled = (date: Date | null) => {
+    if (!date) return true;
+    return date < today;
+  };
+
+  const isDateSelected = (date: Date | null) => {
+    if (!date || !selectedDate) return false;
+    return date.toDateString() === selectedDate.toDateString();
+  };
+
+  // Handle express interest with optional inspection scheduling
+  const handleExpressInterestWithSchedule = async () => {
+    if (!interestMessage.trim()) {
+      setInterestMessage("I'm interested in this property!");
+    }
+    
+    setIsSubmitting(true);
+    try {
+      // First, create the interest
+      const response = await apiClient.createInterest({
+        propertyId: property.id,
+        message: interestMessage || "I'm interested in this property!",
+      });
+      
+      const newInterestId = response?.interest?.id || response?.id;
+      setInterestId(newInterestId);
+      
+      // If date and time selected, also schedule inspection
+      if (selectedDate && selectedTime && newInterestId) {
+        const dateStr = selectedDate.toISOString().split('T')[0];
+        await apiClient.scheduleInspection({
+          interestId: newInterestId,
+          scheduledDate: dateStr,
+          scheduledTime: selectedTime,
+          notes: inspectionNotes,
+        });
+        setSuccessMessage('Interest expressed and inspection scheduled! The agent will be notified.');
+      } else {
+        setSuccessMessage('Interest expressed successfully! The agent will be notified.');
+      }
+      
+      setShowInterestModal(false);
+      onExpressInterest();
+    } catch (err) {
+      console.error('Error expressing interest:', err);
+      alert('Failed to express interest. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
   const formatPrice = (price: number) => {
     return `₦${(price / 1000000).toFixed(1)}M`;
   };
@@ -185,6 +296,17 @@ export function PropertyDetailsPage({
           </div>
         </motion.div>
 
+        {/* Success Message */}
+        {successMessage && (
+          <motion.div
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mb-6 p-4 bg-success/10 border border-success/30 rounded-xl"
+          >
+            <p className="text-success font-medium">{successMessage}</p>
+          </motion.div>
+        )}
+
         {/* CTA Buttons */}
         <motion.div initial={{
         opacity: 0,
@@ -195,14 +317,297 @@ export function PropertyDetailsPage({
       }} transition={{
         delay: 0.5
       }} className="flex gap-4">
-          <button className="flex-1 px-6 py-4 bg-bg-secondary hover:bg-bg-tertiary text-text-primary rounded-xl font-medium transition-colors flex items-center justify-center gap-2">
-            <Calendar className="w-5 h-5" />
-            Schedule Viewing
-          </button>
-          <button onClick={onExpressInterest} className="flex-1 px-6 py-4 bg-primary hover:bg-primary/90 text-white rounded-xl font-medium transition-colors">
-            Express Interest
-          </button>
+          {interestId ? (
+            <>
+              <div className="flex-1 px-6 py-4 bg-success/20 text-success rounded-xl font-medium flex items-center justify-center gap-2">
+                <CheckCircle className="w-5 h-5" />
+                Interest Sent
+              </div>
+              <button 
+                onClick={() => setShowInterestModal(true)}
+                className="flex-1 px-6 py-4 bg-primary hover:bg-primary/90 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
+              >
+                <Calendar className="w-5 h-5" />
+                Schedule Again
+              </button>
+            </>
+          ) : (
+            <button 
+              onClick={() => {
+                if (isAuthenticated) {
+                  setShowInterestModal(true);
+                } else {
+                  setShowLoginPrompt(true);
+                }
+              }}
+              className="w-full px-6 py-4 bg-gradient-gold hover:opacity-90 text-black rounded-xl font-bold transition-all flex items-center justify-center gap-2 gold-glow"
+            >
+              <MessageSquare className="w-5 h-5" />
+              Express Interest & Schedule Viewing
+            </button>
+          )}
         </motion.div>
       </div>
+
+      {/* Express Interest Modal with Calendar */}
+      {showInterestModal && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto"
+          onClick={() => setShowInterestModal(false)}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-bg-primary border border-border-color rounded-2xl w-full max-w-lg my-4 max-h-[90vh] overflow-y-auto"
+          >
+            {/* Header */}
+            <div className="sticky top-0 bg-bg-primary border-b border-border-color p-4 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-primary/10 rounded-full flex items-center justify-center">
+                  <MessageSquare className="w-5 h-5 text-primary" />
+                </div>
+                <div>
+                  <h2 className="font-display text-lg font-bold text-text-primary">
+                    Express Interest
+                  </h2>
+                  <p className="text-xs text-text-secondary">
+                    {property.title}
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowInterestModal(false)}
+                className="p-2 hover:bg-bg-tertiary rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-text-secondary" />
+              </button>
+            </div>
+
+            <div className="p-4 space-y-4">
+              {/* Message Section */}
+              <div>
+                <label className="block text-sm font-medium text-text-primary mb-2">
+                  Your Message
+                </label>
+                <textarea
+                  value={interestMessage}
+                  onChange={(e) => setInterestMessage(e.target.value)}
+                  placeholder="Hi, I'm interested in this property..."
+                  className="w-full px-4 py-3 bg-bg-secondary border border-border-color rounded-xl text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-primary resize-none"
+                  rows={3}
+                />
+              </div>
+
+              {/* Calendar Section */}
+              <div>
+                <label className="block text-sm font-medium text-text-primary mb-2 flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-primary" />
+                  Schedule Inspection Date (Optional)
+                </label>
+                <div className="bg-bg-secondary rounded-xl p-3">
+                  {/* Month Navigation */}
+                  <div className="flex items-center justify-between mb-3">
+                    <button
+                      onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() - 1, 1))}
+                      className="p-1.5 hover:bg-bg-tertiary rounded-lg transition-colors"
+                    >
+                      <ChevronLeft className="w-4 h-4 text-text-secondary" />
+                    </button>
+                    <h3 className="font-semibold text-text-primary text-sm">
+                      {monthNames[currentMonth.getMonth()]} {currentMonth.getFullYear()}
+                    </h3>
+                    <button
+                      onClick={() => setCurrentMonth(new Date(currentMonth.getFullYear(), currentMonth.getMonth() + 1, 1))}
+                      className="p-1.5 hover:bg-bg-tertiary rounded-lg transition-colors"
+                    >
+                      <ChevronRight className="w-4 h-4 text-text-secondary" />
+                    </button>
+                  </div>
+
+                  {/* Day Names */}
+                  <div className="grid grid-cols-7 gap-1 mb-1">
+                    {dayNames.map((day) => (
+                      <div key={day} className="text-center text-xs font-medium text-text-tertiary py-1">
+                        {day}
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Calendar Grid */}
+                  <div className="grid grid-cols-7 gap-1">
+                    {days.map((date, index) => (
+                      <button
+                        key={index}
+                        disabled={isDateDisabled(date)}
+                        onClick={() => date && setSelectedDate(date)}
+                        className={`
+                          aspect-square flex items-center justify-center text-xs rounded-lg transition-all
+                          ${!date ? 'invisible' : ''}
+                          ${isDateDisabled(date) ? 'text-text-tertiary cursor-not-allowed opacity-40' : 'hover:bg-bg-tertiary'}
+                          ${isDateSelected(date) ? 'bg-primary text-white font-bold' : 'text-text-primary'}
+                          ${date && date.toDateString() === today.toDateString() && !isDateSelected(date) ? 'ring-1 ring-primary/50' : ''}
+                        `}
+                      >
+                        {date?.getDate()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Selected Date Display */}
+                {selectedDate && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="mt-2 p-2 bg-primary/10 border border-primary/30 rounded-lg"
+                  >
+                    <p className="text-xs text-primary font-medium">
+                      📅 {selectedDate.toLocaleDateString('en-NG', { 
+                        weekday: 'long', 
+                        month: 'long', 
+                        day: 'numeric' 
+                      })}
+                    </p>
+                  </motion.div>
+                )}
+              </div>
+
+              {/* Time Slots - Only show if date is selected */}
+              {selectedDate && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                >
+                  <label className="block text-sm font-medium text-text-primary mb-2 flex items-center gap-2">
+                    <Clock className="w-4 h-4 text-primary" />
+                    Select Time
+                  </label>
+                  <div className="grid grid-cols-5 gap-1.5">
+                    {timeSlots.map((time) => (
+                      <button
+                        key={time}
+                        onClick={() => setSelectedTime(time)}
+                        className={`
+                          py-2 px-1 rounded-lg text-xs font-medium transition-all
+                          ${selectedTime === time 
+                            ? 'bg-primary text-white' 
+                            : 'bg-bg-secondary hover:bg-bg-tertiary text-text-primary border border-border-color'
+                          }
+                        `}
+                      >
+                        {time}
+                      </button>
+                    ))}
+                  </div>
+                </motion.div>
+              )}
+
+              {/* Inspection Notes - Only show if time is selected */}
+              {selectedTime && (
+                <motion.div
+                  initial={{ opacity: 0, y: -10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                >
+                  <label className="block text-sm font-medium text-text-primary mb-2">
+                    Notes for Agent (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={inspectionNotes}
+                    onChange={(e) => setInspectionNotes(e.target.value)}
+                    placeholder="E.g., Please call 30 mins before..."
+                    className="w-full px-4 py-2 bg-bg-secondary border border-border-color rounded-xl text-text-primary placeholder:text-text-tertiary focus:outline-none focus:border-primary text-sm"
+                  />
+                </motion.div>
+              )}
+            </div>
+
+            {/* Footer */}
+            <div className="sticky bottom-0 bg-bg-primary border-t border-border-color p-4">
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowInterestModal(false)}
+                  className="flex-1 px-4 py-3 bg-bg-secondary hover:bg-bg-tertiary text-text-primary rounded-xl font-medium transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleExpressInterestWithSchedule}
+                  disabled={isSubmitting}
+                  className="flex-1 px-4 py-3 bg-gradient-gold hover:opacity-90 text-black rounded-xl font-bold transition-all flex items-center justify-center gap-2 gold-glow"
+                >
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                      Sending...
+                    </>
+                  ) : selectedDate && selectedTime ? (
+                    <>
+                      <Calendar className="w-4 h-4" />
+                      Send & Schedule
+                    </>
+                  ) : (
+                    'Send Interest'
+                  )}
+                </button>
+              </div>
+              {selectedDate && selectedTime && (
+                <p className="text-xs text-text-tertiary text-center mt-2">
+                  Interest + Inspection on {selectedDate.toLocaleDateString('en-NG', { month: 'short', day: 'numeric' })} at {selectedTime}
+                </p>
+              )}
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+
+      {/* Login Required Prompt */}
+      {showLoginPrompt && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={() => setShowLoginPrompt(false)}
+        >
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            onClick={(e) => e.stopPropagation()}
+            className="bg-bg-primary border border-border-color rounded-2xl w-full max-w-sm p-6 text-center"
+          >
+            <div className="w-16 h-16 bg-primary/10 rounded-full flex items-center justify-center mx-auto mb-4">
+              <LogIn className="w-8 h-8 text-primary" />
+            </div>
+            <h2 className="font-display text-xl font-bold text-text-primary mb-2">
+              Login Required
+            </h2>
+            <p className="text-text-secondary mb-6">
+              Please login or create an account to express interest in this property and schedule viewings.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={() => setShowLoginPrompt(false)}
+                className="flex-1 px-4 py-3 bg-bg-secondary hover:bg-bg-tertiary text-text-primary rounded-xl font-medium transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  setShowLoginPrompt(false);
+                  onLoginRequired?.();
+                }}
+                className="flex-1 px-4 py-3 bg-gradient-gold hover:opacity-90 text-black rounded-xl font-bold transition-all gold-glow"
+              >
+                Login
+              </button>
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
     </div>;
 }

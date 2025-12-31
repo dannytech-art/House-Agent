@@ -16,6 +16,18 @@ export function AgentDashboardPage({
   onNavigate
 }: AgentDashboardPageProps) {
   const [showShareModal, setShowShareModal] = useState(false);
+  
+  // Guard against null/undefined agent
+  if (!agent) {
+    return (
+      <div className="min-h-screen bg-bg-secondary flex items-center justify-center pb-24">
+        <div className="text-center">
+          <p className="text-text-secondary">Loading agent dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+  
   const stats = [{
     title: 'Total Listings',
     value: agent.totalListings,
@@ -82,7 +94,7 @@ export function AgentDashboardPage({
         <div className="flex justify-between items-center mb-8">
           <div>
             <h1 className="font-display text-3xl font-bold text-text-primary mb-1">
-              Welcome back, {agent.name.split(' ')[0]} 👋
+              Welcome back, {agent.name?.split(' ')[0] || 'Agent'} 👋
             </h1>
             <p className="text-text-secondary">
               Here's what's happening with your listings today.
@@ -116,7 +128,16 @@ export function AgentDashboardPage({
                   View All <ChevronRight className="w-4 h-4" />
                 </button>
               </div>
-              {agent.challenges[0] && <ChallengeProgressCard challenge={agent.challenges[0]} />}
+              {agent.challenges && agent.challenges.length > 0 ? (
+                <ChallengeProgressCard challenge={agent.challenges[0]} />
+              ) : (
+                <div className="bg-bg-primary border border-border-color rounded-2xl p-6 text-center">
+                  <p className="text-text-secondary">No active challenges yet</p>
+                  <button onClick={() => onNavigate('quests')} className="mt-3 text-sm text-primary hover:underline">
+                    View available quests
+                  </button>
+                </div>
+              )}
             </section>
 
             {/* Recent Activity */}
