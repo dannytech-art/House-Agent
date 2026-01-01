@@ -7,6 +7,16 @@ import { PropertyType, DirectAgentContact } from '../types';
 import { mockAgent } from '../utils/mockData';
 import apiClient from '../lib/api-client';
 
+// Helper to normalize URLs returned by backend (which may be relative)
+const API_BASE = (import.meta as any).env?.VITE_API_URL || 'https://house-agent-backend-mfx5.onrender.com/api';
+const ASSET_BASE = API_BASE.replace(/\/?api\/?$/, '');
+const toAbsoluteUrl = (u: string) => {
+  if (!u) return u;
+  if (u.startsWith('http')) return u;
+  if (u.startsWith('blob:')) return u; // keep as preview only
+  return `${ASSET_BASE}${u.startsWith('/') ? '' : '/'}${u}`;
+};
+
 export function AddListingPage() {
   const [step, setStep] = useState(1);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
@@ -102,16 +112,18 @@ export function AddListingPage() {
         
         // If server upload succeeded, replace local URLs with server URLs
         if (result.images && result.images.length > 0) {
-          // Replace the last N images with server URLs
+          // Replace the last N images with server URLs (normalized to absolute)
           setUploadedImages(prev => {
             const prevWithoutNew = prev.slice(0, prev.length - newImages.length);
-            return [...prevWithoutNew, ...result.images];
+            const normalized = result.images.map((u) => toAbsoluteUrl(u));
+            return [...prevWithoutNew, ...normalized];
           });
         }
         if (result.videos && result.videos.length > 0) {
           setUploadedVideos(prev => {
             const prevWithoutNew = prev.slice(0, prev.length - newVideos.length);
-            return [...prevWithoutNew, ...result.videos];
+            const normalized = result.videos.map((u) => toAbsoluteUrl(u));
+            return [...prevWithoutNew, ...normalized];
           });
         }
         
@@ -161,6 +173,14 @@ export function AddListingPage() {
     setIsSubmitting(true);
     try {
       // Create property via apiClient (connects to backend at localhost:3000)
+      // Ensure we don't persist blob: preview URLs
+      const imagesToSave = uploadedImages
+        .map((u) => toAbsoluteUrl(u))
+        .filter((u) => u && !u.startsWith('blob:'));
+      const videosToSave = uploadedVideos
+        .map((u) => toAbsoluteUrl(u))
+        .filter((u) => u && !u.startsWith('blob:'));
+
       await apiClient.createProperty({
         title: formData.title,
         type: formData.type,
@@ -172,8 +192,8 @@ export function AddListingPage() {
         description: formData.description,
         amenities: formData.amenities,
         agentType: formData.agentType,
-        images: uploadedImages,
-        videos: uploadedVideos,
+        images: imagesToSave,
+        videos: videosToSave,
       });
       
       alert('Listing created successfully!');
@@ -492,7 +512,7 @@ export function AddListingPage() {
                       {uploadedImages.map((url, index) => (
                         <div key={index} className="relative aspect-square rounded-lg overflow-hidden group">
                           <img 
-                            src={url} 
+                            src={toAbsoluteUrl(url)} 
                             alt={`Upload ${index + 1}`} 
                             className="w-full h-full object-cover"
                           />
@@ -519,7 +539,7 @@ export function AddListingPage() {
                       {uploadedVideos.map((url, index) => (
                         <div key={index} className="relative aspect-video rounded-lg overflow-hidden group">
                           <video 
-                            src={url} 
+                            src={toAbsoluteUrl(url)} 
                             className="w-full h-full object-cover"
                             controls
                           />
