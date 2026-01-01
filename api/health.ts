@@ -1,6 +1,5 @@
 import { success } from './_lib/utils';
 import type { Request } from './_lib/types';
-import { errorResponse } from './_lib/utils';
 
 export const config = {
   runtime: 'edge',

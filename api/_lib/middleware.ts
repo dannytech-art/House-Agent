@@ -1,4 +1,4 @@
-import { Request, Response } from './types';
+import { Request } from './types';
 import { unauthorized, errorResponse, forbidden } from './utils';
 import { verifyToken, extractTokenFromHeader } from './security';
 import { getItem } from './data-store';

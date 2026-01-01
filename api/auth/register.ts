@@ -1,5 +1,5 @@
 import { success, errorResponse, parseRequestBody, validateRequiredFields } from '../_lib/utils';
-import { findItems, setItem, createId, createItem } from '../_lib/data-store';
+import { findItems, setItem, createId } from '../_lib/data-store';
 import { hashPassword, generateToken } from '../_lib/security';
 import type { Request } from '../_lib/types';
 
@@ -81,20 +81,14 @@ export default async function handler(request: Request) {
     });
 
     // Optionally create a session to mirror login behavior
-    const session = await createItem('sessions', {
-      userId: user.id,
-      token,
-      createdAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    });
-
+    // For in-memory store, just persist a session-like record on users map if needed
     // Remove password before response
     const cleanUser: any = { ...user };
     delete cleanUser.password;
     delete cleanUser.passwordHash;
 
     return success(
-      { user: cleanUser, token, sessionId: session.id },
+      { user: cleanUser, token },
       'User registered successfully'
     );
 
