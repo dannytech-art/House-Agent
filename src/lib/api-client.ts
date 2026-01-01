@@ -1,8 +1,8 @@
 // API Client for frontend
 // Connects to the Express backend server
 
-// Default to localhost:3000 for development
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+// Default to hosted backend, allow override via VITE_API_URL
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://house-agent-backend-mfx5.onrender.com/api';
 
 interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean>;
