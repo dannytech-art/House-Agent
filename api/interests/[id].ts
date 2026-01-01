@@ -52,13 +52,13 @@ async function handleUpdateInterest(request: Request, id: string) {
     }
 
     // Check authorization - agent can update status, seeker can update message
-    const user = await getItem('users', auth.userId);
+    const user = await getItem('users', auth.userId) as any;
     const property = interest.property_id ? await getItem('properties', interest.property_id) : null;
     
     const canUpdate = 
       interest.seeker_id === auth.userId || // Seeker owns the interest
-      (user?.role === 'agent' && property?.agent_id === auth.userId) || // Agent owns the property
-      user?.role === 'admin'; // Admin can update
+      ((user && (user as any).role === 'agent') && property?.agent_id === auth.userId) || // Agent owns the property
+      ((user && (user as any).role === 'admin')); // Admin can update
 
     if (!canUpdate) {
       return errorResponse('Unauthorized to update this interest', 403);
@@ -98,8 +98,8 @@ async function handleDeleteInterest(request: Request, id: string) {
 
     // Only seeker can delete their own interest, or admin
     if (interest.seeker_id !== auth.userId) {
-      const user = await getItem('users', auth.userId);
-      if (user?.role !== 'admin') {
+      const user = await getItem('users', auth.userId) as any;
+      if (!user || (user as any).role !== 'admin') {
         return errorResponse('Unauthorized to delete this interest', 403);
       }
     }

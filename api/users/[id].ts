@@ -1,6 +1,6 @@
 import { success, errorResponse, notFound } from '../_lib/utils';
 import { getItem, setItem, deleteItem } from '../_lib/data-store';
-import { requireAuth, checkRole } from '../_lib/middleware';
+import { requireAuth } from '../_lib/middleware';
 import type { Request } from '../_lib/types';
 
 export const config = {
@@ -65,9 +65,9 @@ async function handleUpdateUser(request: Request, id: string) {
       ...user,
       ...body,
       id, // Prevent ID change
-      role: auth.role === 'admin' ? (body.role || user.role) : user.role, // Only admin can change role
+      role: auth.role === 'admin' ? ((body as any).role || (user as any).role) : (user as any).role, // Only admin can change role
       updated_at: new Date().toISOString(),
-    };
+    } as any;
 
     await setItem('users', id, updatedUser);
 
@@ -99,7 +99,7 @@ async function handleDeleteUser(request: Request, id: string) {
 
     // Soft delete: mark as inactive instead of hard delete
     const body = await request.json();
-    const hardDelete = body.hardDelete === true && auth.role === 'admin';
+    const hardDelete = (body as any).hardDelete === true && auth.role === 'admin';
 
     if (hardDelete) {
       // Hard delete (admin only)

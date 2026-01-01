@@ -1,5 +1,5 @@
 import { success, errorResponse, parseRequestBody, validateRequiredFields } from '../_lib/utils';
-import { findItems, createItem } from '../_lib/data-store'; // 👈 Ensure session is saved
+import { findItems } from '../_lib/data-store';
 import { verifyPassword, generateToken } from '../_lib/security';
 import type { Request } from '../_lib/types';
 
@@ -48,14 +48,7 @@ export default async function handler(request: Request) {
       role: user.role,
     });
 
-    // Create Session
-    const session = await createItem('sessions', {
-      userId: user.id,
-      token,
-      createdAt: new Date().toISOString(),
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
-    });
-
+    
     // Sanitize response — remove password fields completely
     const cleanUser: any = { ...user };
     delete cleanUser.password;
@@ -66,7 +59,6 @@ export default async function handler(request: Request) {
       {
         user: cleanUser,
         token,
-        sessionId: session.id,
       },
       'Login successful'
     );
