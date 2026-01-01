@@ -1,5 +1,5 @@
 import { success, errorResponse, parseRequestBody, validateRequiredFields } from '../_lib/utils';
-import { findItems } from '../_lib/data-store';
+import { findItems, createItem } from '../_lib/data-store'; // 👈 Ensure session is saved
 import { verifyPassword, generateToken } from '../_lib/security';
 import type { Request } from '../_lib/types';
 
@@ -14,7 +14,6 @@ export default async function handler(request: Request) {
 
   try {
     const body = await parseRequestBody(request);
-    
     const missing = validateRequiredFields(body, ['email', 'password']);
     if (missing.length > 0) {
       return errorResponse(`Missing required fields: ${missing.join(', ')}`, 400);
@@ -22,18 +21,18 @@ export default async function handler(request: Request) {
 
     const { email, password } = body;
 
-    // Find user (Supabase or in-memory)
     const users = await findItems('users', { email });
-    const user = users.length > 0 ? users[0] : null;
+    const user = users[0];
 
-    if (!user) {
-      return errorResponse('Invalid email or password', 401);
-    }
+    if (!user) return errorResponse('Invalid email or password', 401);
 
-    // Verify password - check both password_hash and passwordHash for compatibility
-    const passwordHash = (user as any).password_hash || (user as any).passwordHash;
+    // Ensure hash naming compatibility
+    const passwordHash =
+      (user as any).password_hash ||
+      (user as any).passwordHash ||
+      user.password; // fallback if imported users have plain passwords
+
     if (!passwordHash) {
-      // Legacy user without password hash - reject for security
       return errorResponse('Invalid email or password', 401);
     }
 
@@ -42,31 +41,36 @@ export default async function handler(request: Request) {
       return errorResponse('Invalid email or password', 401);
     }
 
-    // Generate proper JWT token
+    // Create JWT Token
     const token = await generateToken({
       userId: user.id,
       email: user.email,
       role: user.role,
     });
 
-    // Create session
-    const session = {
+    // Create Session
+    const session = await createItem('sessions', {
       userId: user.id,
       token,
-      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days
       createdAt: new Date().toISOString(),
-    };
+      expiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+    });
 
-    // Return user and token (exclude password hash)
-    const { passwordHash: _, ...userWithoutPassword } = user;
-    
-    return success({
-      user: userWithoutPassword,
-      token,
-      session,
-    }, 'Login successful');
+    // Sanitize response — remove password fields completely
+    const cleanUser: any = { ...user };
+    delete cleanUser.password;
+    delete cleanUser.passwordHash;
+    delete cleanUser.password_hash;
+
+    return success(
+      {
+        user: cleanUser,
+        token,
+        sessionId: session.id,
+      },
+      'Login successful'
+    );
   } catch (error: any) {
     return errorResponse(error.message || 'Login failed', 500);
   }
 }
-

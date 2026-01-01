@@ -1,44 +1,86 @@
 import { useState, useEffect, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { User, Agent, UserRole } from '../types';
 import apiClient from '../lib/api-client';
 
+// Simple internal event bus so all useAuth consumers stay in sync
+// This avoids needing a provider and ensures immediate cross-component updates
+
+type AuthListener = (payload: {
+  user?: User | Agent | null;
+  isAuthenticated?: boolean;
+  error?: string | null;
+}) => void;
+
+const authListeners = new Set<AuthListener>();
+
+function subscribeAuth(listener: AuthListener) {
+  authListeners.add(listener);
+  return () => authListeners.delete(listener);
+}
+
+function emitAuth(payload: {
+  user?: User | Agent | null;
+  isAuthenticated?: boolean;
+  error?: string | null;
+}) {
+  authListeners.forEach((listener) => {
+    try {
+      listener(payload);
+    } catch {}
+  });
+}
+
 export function useAuth() {
+  const navigate = useNavigate();
+
   const [user, setUser] = useState<User | Agent | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Check if user is already authenticated via token
     const checkAuth = async () => {
       const token = apiClient.getToken();
+
       if (token) {
         try {
           const userData = await apiClient.getCurrentUser();
           setUser(userData as User | Agent);
           setIsAuthenticated(true);
+          emitAuth({ user: userData as User | Agent, isAuthenticated: true, error: null });
         } catch {
-          // Token invalid, clear it
           apiClient.setToken(null);
           localStorage.removeItem('vilanow_user');
         }
       } else {
-        // Fallback to localStorage user data
         const stored = localStorage.getItem('vilanow_user');
         if (stored) {
           try {
             const parsedUser = JSON.parse(stored);
             setUser(parsedUser);
             setIsAuthenticated(true);
+            emitAuth({ user: parsedUser, isAuthenticated: true, error: null });
           } catch {
             localStorage.removeItem('vilanow_user');
           }
         }
       }
+
       setIsLoading(false);
     };
 
     checkAuth();
+  }, []);
+
+  // Subscribe to global auth changes so all hook consumers stay in sync
+  useEffect(() => {
+    const unsubscribe = subscribeAuth(({ user, isAuthenticated, error }) => {
+      if (user !== undefined) setUser(user as User | Agent | null);
+      if (isAuthenticated !== undefined) setIsAuthenticated(!!isAuthenticated);
+      if (error !== undefined) setError(error);
+    });
+    return unsubscribe;
   }, []);
 
   const clearError = useCallback(() => setError(null), []);
@@ -50,10 +92,13 @@ export function useAuth() {
     try {
       const response = await apiClient.login(email, password);
       const userData = response.user;
-      
+
       setUser(userData);
       setIsAuthenticated(true);
       localStorage.setItem('vilanow_user', JSON.stringify(userData));
+      emitAuth({ user: userData, isAuthenticated: true, error: null });
+
+      navigate('/dashboard'); // Redirect after login
     } catch (err: any) {
       setError(err.message || 'Invalid email or password');
     } finally {
@@ -74,11 +119,19 @@ export function useAuth() {
         role,
         agentType: userData.agentType,
       });
-      
+
+      // Ensure token is set immediately after signup if provided by API
+      if ((response as any).token) {
+        apiClient.setToken((response as any).token);
+      }
+
       const newUser = response.user;
       setUser(newUser);
       setIsAuthenticated(true);
       localStorage.setItem('vilanow_user', JSON.stringify(newUser));
+      emitAuth({ user: newUser, isAuthenticated: true, error: null });
+
+      navigate('/dashboard'); // Redirect after signup
     } catch (err: any) {
       setError(err.message || 'Failed to create account');
     } finally {
@@ -92,8 +145,8 @@ export function useAuth() {
 
     try {
       await apiClient.requestPasswordReset(email);
-    } catch (err: any) {
-      // Don't show error for security (don't reveal if email exists)
+    } catch {
+      // ignore to avoid exposing if email exists
     } finally {
       setIsLoading(false);
     }
@@ -116,11 +169,15 @@ export function useAuth() {
     try {
       await apiClient.logout();
     } catch {
-      // Ignore errors during logout
+      // ignore
     }
+
     setUser(null);
     setIsAuthenticated(false);
     localStorage.removeItem('vilanow_user');
+    emitAuth({ user: null, isAuthenticated: false, error: null });
+
+    navigate('/login'); // Redirect after logout
   };
 
   const updateUser = async (updates: Partial<User | Agent>) => {
@@ -131,12 +188,13 @@ export function useAuth() {
       const mergedUser = { ...user, ...updatedUser };
       setUser(mergedUser as User | Agent);
       localStorage.setItem('vilanow_user', JSON.stringify(mergedUser));
+      emitAuth({ user: mergedUser as User | Agent });
     } catch (err: any) {
       console.error('Failed to update user:', err);
-      // Still update locally even if API fails
       const updated = { ...user, ...updates };
       setUser(updated as User | Agent);
       localStorage.setItem('vilanow_user', JSON.stringify(updated));
+      emitAuth({ user: updated as User | Agent });
     }
   };
 
