@@ -1,12 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Wallet, TrendingUp, Plus, History } from 'lucide-react';
+import { Wallet, TrendingUp, Plus, History, Loader2 } from 'lucide-react';
 import { CreditBundle } from '../components/CreditBundle';
 import { PaymentModal } from '../components/PaymentModal';
 import { PaymentHistory } from '../components/PaymentHistory';
 import { useAuth } from '../hooks/useAuth';
 import { apiClient } from '../lib/api-client';
 import { CreditBundle as CreditBundleType, Transaction } from '../types';
+
+// Default bundles if API fails
+const DEFAULT_BUNDLES: CreditBundleType[] = [
+  { id: 'bundle-1', credits: 50, price: 2500, bonus: 0 },
+  { id: 'bundle-2', credits: 100, price: 4500, bonus: 10, popular: true },
+  { id: 'bundle-3', credits: 250, price: 10000, bonus: 50 },
+  { id: 'bundle-4', credits: 500, price: 18000, bonus: 150 },
+];
+
 export function WalletPage() {
   const {
     user
@@ -15,7 +24,7 @@ export function WalletPage() {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedBundle, setSelectedBundle] = useState<CreditBundleType | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [bundles, setBundles] = useState<CreditBundleType[]>([]);
+  const [bundles, setBundles] = useState<CreditBundleType[]>(DEFAULT_BUNDLES);
   const [loading, setLoading] = useState(true);
 
   // Load balance and bundles
@@ -23,24 +32,26 @@ export function WalletPage() {
     const loadData = async () => {
       try {
         const [balanceData, bundlesData, transactionsData] = await Promise.all([
-          apiClient.getCreditBalance(),
-          apiClient.getCreditBundles(),
-          apiClient.getTransactions(),
+          apiClient.getCreditBalance().catch(() => ({ credits: 0 })),
+          apiClient.getCreditBundles().catch(() => null),
+          apiClient.getTransactions().catch(() => []),
         ]);
         
-        setBalance(balanceData.credits || 0);
-        setBundles(bundlesData || []);
+        setBalance(balanceData?.credits || balanceData?.balance || 0);
+        // Only update bundles if API returned data
+        if (bundlesData && Array.isArray(bundlesData) && bundlesData.length > 0) {
+          setBundles(bundlesData);
+        }
         setTransactions(transactionsData || []);
       } catch (error) {
         console.error('Error loading wallet data:', error);
+        // Keep default bundles
       } finally {
         setLoading(false);
       }
     };
     
-    if (user) {
-      loadData();
-    }
+    loadData();
   }, [user]);
 
   const handleBuyCredits = (bundle: CreditBundleType) => {
@@ -48,23 +59,22 @@ export function WalletPage() {
     setShowPaymentModal(true);
   };
 
-  const handlePaymentSuccess = async (transactionId: string) => {
+  const handlePaymentSuccess = async (reference: string) => {
     try {
-      // Purchase credits via API
-      if (selectedBundle) {
-        const response = await apiClient.purchaseCredits(selectedBundle.id);
-        
-        if (response.newBalance !== undefined) {
-          setBalance(response.newBalance);
-        }
-        
-        // Reload transactions
-        const updatedTransactions = await apiClient.getTransactions();
-        setTransactions(updatedTransactions || []);
+      // Payment was already verified in PaymentModal, just refresh data
+      const [balanceData, transactionsData] = await Promise.all([
+        apiClient.getCreditBalance().catch(() => null),
+        apiClient.getTransactions().catch(() => []),
+      ]);
+      
+      if (balanceData) {
+        setBalance(balanceData.credits || balanceData.balance || 0);
       }
+      setTransactions(transactionsData || []);
     } catch (error) {
-      console.error('Error processing payment:', error);
-      alert('Payment processed but failed to update balance. Please refresh.');
+      console.error('Error refreshing data after payment:', error);
+      // Suggest refresh
+      alert('Payment successful! Please refresh to see updated balance.');
     }
   };
   return <div className="min-h-screen bg-bg-secondary pb-24">

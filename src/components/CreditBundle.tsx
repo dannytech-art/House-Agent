@@ -4,19 +4,28 @@ import { Zap, TrendingUp } from 'lucide-react';
 import { CreditBundle as CreditBundleType } from '../types';
 interface CreditBundleProps {
   bundle: CreditBundleType;
-  onSelect: (bundle: CreditBundleType) => void;
+  onBuy?: () => void;
+  onSelect?: (bundle: CreditBundleType) => void;
 }
 export function CreditBundle({
   bundle,
+  onBuy,
   onSelect
 }: CreditBundleProps) {
+  const handleClick = () => {
+    if (onBuy) {
+      onBuy();
+    } else if (onSelect) {
+      onSelect(bundle);
+    }
+  };
   const totalCredits = bundle.credits + bundle.bonus;
   const hasBonus = bundle.bonus > 0;
   return <motion.button whileHover={{
     scale: 1.02
   }} whileTap={{
     scale: 0.98
-  }} onClick={() => onSelect(bundle)} className={`relative w-full text-left p-6 rounded-2xl border-2 transition-all ${bundle.popular ? 'border-primary bg-primary/5 shadow-lg shadow-primary/10' : 'border-border-color bg-bg-primary hover:border-primary/50'}`}>
+  }} onClick={handleClick} className={`relative w-full text-left p-6 rounded-2xl border-2 transition-all ${bundle.popular ? 'border-primary bg-primary/5 shadow-lg shadow-primary/10' : 'border-border-color bg-bg-primary hover:border-primary/50'}`}>
       {bundle.popular && <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 bg-primary text-white text-xs font-bold rounded-full">
           MOST POPULAR
         </div>}

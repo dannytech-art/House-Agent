@@ -164,6 +164,39 @@ export interface CreditBundle {
   bonus: number;
   popular?: boolean;
 }
+
+// Payment Types
+export type PaymentStatus = 'pending' | 'success' | 'failed' | 'abandoned';
+export type PaymentMethod = 'card' | 'bank_transfer' | 'ussd' | 'qr';
+
+export interface PaymentInitResponse {
+  authorization_url: string;
+  access_code: string;
+  reference: string;
+}
+
+export interface PaymentVerifyResponse {
+  status: PaymentStatus;
+  amount: number;
+  credits?: number;
+  newBalance?: number;
+  message: string;
+  reference: string;
+  paidAt?: string;
+}
+
+export interface PaymentRecord {
+  id: string;
+  reference: string;
+  amount: number;
+  credits: number;
+  status: PaymentStatus;
+  method: PaymentMethod;
+  bundleId?: string;
+  createdAt: string;
+  paidAt?: string;
+}
+
 export interface SearchPrompt {
   raw: string;
   parsed: {
@@ -229,6 +262,29 @@ export interface ChatSession {
   messages: ChatMessage[];
   createdAt: string;
   lastMessageAt: string;
+  // New fields from API
+  isUnlocked?: boolean;
+  canSendMessage?: boolean;
+  lastMessage?: {
+    message: string;
+    timestamp: string;
+  };
+  unreadCount?: number;
+  property?: {
+    id: string;
+    title: string;
+    images: string[];
+  };
+  otherParticipant?: {
+    id: string;
+    name: string;
+    avatar?: string;
+    role: 'seeker' | 'agent';
+  };
+  // For display
+  participantName?: string;
+  participantAvatar?: string;
+  propertyTitle?: string;
 }
 export interface GroupMember {
   id: string;

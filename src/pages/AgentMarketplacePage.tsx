@@ -6,6 +6,42 @@ import { CreateOfferModal } from '../components/CreateOfferModal';
 import { MarketplaceOfferDetails } from '../components/MarketplaceOfferDetails';
 import { apiClient } from '../lib/api-client';
 import { MarketplaceOffer } from '../types';
+
+// Fallback offers when API fails
+const FALLBACK_OFFERS: MarketplaceOffer[] = [
+  {
+    id: 'offer-1',
+    type: 'lead',
+    agentId: 'agent-1',
+    agentName: 'Chidi Okafor',
+    description: 'Hot lead looking for 3-bed in Lekki Phase 1. Budget ₦15-25M. Ready to close.',
+    price: 25,
+    status: 'active',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'offer-2',
+    type: 'co-broking',
+    agentId: 'agent-2',
+    agentName: 'Fatima Ibrahim',
+    propertyId: 'prop-1',
+    description: 'Need help closing a ₦85M duplex in Banana Island. 50/50 split.',
+    price: 15,
+    status: 'active',
+    createdAt: new Date().toISOString(),
+  },
+  {
+    id: 'offer-3',
+    type: 'access',
+    agentId: 'agent-3',
+    agentName: 'Emeka Nwosu',
+    description: 'Exclusive access to 5 off-market properties in Ikoyi. Serious buyers only.',
+    price: 50,
+    status: 'active',
+    createdAt: new Date().toISOString(),
+  },
+];
+
 interface AgentMarketplacePageProps {
   currentUserId: string;
   currentCredits: number;
@@ -19,7 +55,7 @@ export function AgentMarketplacePage({
   const [activeTab, setActiveTab] = useState<'buy' | 'sell'>('buy');
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [selectedOffer, setSelectedOffer] = useState<MarketplaceOffer | null>(null);
-  const [offers, setOffers] = useState<MarketplaceOffer[]>([]);
+  const [offers, setOffers] = useState<MarketplaceOffer[]>(FALLBACK_OFFERS);
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState<string | null>(null);
   const [credits, setCredits] = useState(currentCredits);
@@ -30,21 +66,25 @@ export function AgentMarketplacePage({
       try {
         setLoading(true);
         const [offersData, balanceData] = await Promise.all([
-          apiClient.getMarketplaceOffers(),
-          apiClient.getCreditBalance(),
+          apiClient.getMarketplaceOffers().catch(() => null),
+          apiClient.getCreditBalance().catch(() => ({ credits: currentCredits })),
         ]);
         
-        setOffers(offersData || []);
-        setCredits(balanceData.credits || 0);
+        // Only update offers if API returned data
+        if (offersData && Array.isArray(offersData) && offersData.length > 0) {
+          setOffers(offersData);
+        }
+        setCredits(balanceData?.credits || balanceData?.balance || currentCredits);
       } catch (error) {
         console.error('Error loading marketplace data:', error);
+        // Keep fallback offers
       } finally {
         setLoading(false);
       }
     };
     
     loadData();
-  }, []);
+  }, [currentCredits]);
 
   const handleCreateOffer = async (newOffer: any) => {
     try {

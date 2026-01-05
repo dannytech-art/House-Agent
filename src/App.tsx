@@ -23,6 +23,7 @@ import { LeaderboardPage } from './pages/LeaderboardPage';
 import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { SeekerRequestsPage } from './pages/SeekerRequestsPage';
 import { SwipePage } from './pages/SwipePage';
+import { PaymentCallbackPage } from './pages/PaymentCallbackPage';
 import { TermsPage } from './pages/TermsPage';
 import { PrivacyPage } from './pages/PrivacyPage';
 import { HelpPage } from './pages/HelpPage';
@@ -158,6 +159,7 @@ function AppContent() {
     if (path === '/terms') return <TermsPage />;
     if (path === '/privacy') return <PrivacyPage />;
     if (path === '/help') return <HelpPage />;
+    if (path === '/payment/callback') return <PaymentCallbackPage onNavigate={handleNavigate} />;
     if (path === '/admin' || currentPage === 'admin') {
       if (!isAdmin) {
         return <ErrorPage />;

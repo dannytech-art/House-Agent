@@ -393,20 +393,32 @@ class ApiClient {
     });
   }
 
-  // Chat endpoints
-  async getChatSessions() {
+  // Chat endpoints (Updated - Requires Unlock)
+  async getChats() {
+    // Returns chats with isUnlocked, canSendMessage flags
     return this.request('/chats');
+  }
+
+  // Alias for getChats
+  async getChatSessions() {
+    return this.getChats();
   }
 
   async getChatMessages(sessionId: string) {
     return this.request(`/chats/${sessionId}/messages`);
   }
 
-  async sendMessage(sessionId: string, message: string, type: string = 'text') {
+  async sendChatMessage(sessionId: string, message: string, type: string = 'text') {
+    // Note: Blocks agent if seeker not unlocked
     return this.request(`/chats/${sessionId}/messages`, {
       method: 'POST',
       body: JSON.stringify({ message, type }),
     });
+  }
+
+  // Alias for sendChatMessage
+  async sendMessage(sessionId: string, message: string, type: string = 'text') {
+    return this.sendChatMessage(sessionId, message);
   }
 
   async createChatSession(participantId: string, propertyId?: string, initialMessage?: string) {
@@ -416,31 +428,70 @@ class ApiClient {
     });
   }
 
-  // Credits endpoints
+  // Payments & Credits endpoints (Paystack)
   async getCreditBundles() {
-    return this.request('/credits/bundles');
+    return this.request('/payments/bundles');
   }
 
   async getCreditBalance() {
-    return this.request('/credits/balance');
-  }
-
-  async purchaseCredits(bundleId: string, paymentReference?: string) {
-    return this.request('/credits/purchase', {
-      method: 'POST',
-      body: JSON.stringify({ bundleId, paymentReference }),
-    });
+    return this.request('/payments/balance');
   }
 
   async getTransactions() {
-    return this.request('/credits/transactions');
+    return this.request('/payments/transactions');
+  }
+
+  async initializePayment(data: {
+    bundleId: string;
+    callback_url?: string;
+  }): Promise<{
+    transactionId: string;
+    reference: string;
+    authorizationUrl: string;
+    accessCode: string;
+    bundle: {
+      credits: number;
+      bonus: number;
+      totalCredits: number;
+      price: number;
+    };
+  }> {
+    return this.request('/payments/purchase', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
+  async verifyPayment(reference: string): Promise<{
+    credits: number;
+    newBalance: number;
+    status: 'completed' | 'failed' | 'pending';
+  }> {
+    return this.request(`/payments/verify/${reference}`);
+  }
+
+  async getPaymentStatus() {
+    // Check if payment is configured
+    return this.request('/payments/status');
+  }
+
+  // Legacy aliases for backwards compatibility
+  async purchaseCredits(bundleId: string, paymentReference?: string) {
+    return this.initializePayment({ bundleId });
   }
 
   async loadWallet(amount: number) {
-    return this.request('/credits/wallet/load', {
-      method: 'POST',
-      body: JSON.stringify({ amount }),
-    });
+    // Not available in new API - use initializePayment with bundle
+    console.warn('loadWallet is deprecated. Use initializePayment with a bundle instead.');
+    return { error: 'Use initializePayment with a bundle' };
+  }
+
+  async getPaymentHistory(params?: {
+    page?: number;
+    limit?: number;
+    status?: 'success' | 'failed' | 'pending';
+  }) {
+    return this.getTransactions();
   }
 
   // Territories endpoints
