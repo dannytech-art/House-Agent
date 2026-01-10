@@ -6,9 +6,10 @@ import { ChatInterface } from '../components/ChatInterface';
 import { PropertyType, DirectAgentContact } from '../types';
 import { mockAgent } from '../utils/mockData';
 import apiClient from '../lib/api-client';
+import { useToast, getErrorMessage } from '../contexts/ToastContext';
 
 // Helper to normalize URLs returned by backend (which may be relative)
-const API_BASE = (import.meta as any).env?.VITE_API_URL || 'https://house-agent-backend-mfx5.onrender.com/api';
+const API_BASE = (import.meta as any).env?.VITE_API_URL || 'http://localhost:3000/api';
 const ASSET_BASE = API_BASE.replace(/\/?api\/?$/, '');
 const toAbsoluteUrl = (u: string) => {
   if (!u) return u;
@@ -18,6 +19,7 @@ const toAbsoluteUrl = (u: string) => {
 };
 
 export function AddListingPage() {
+  const toast = useToast();
   const [step, setStep] = useState(1);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
@@ -85,6 +87,7 @@ export function AddListingPage() {
 
       if (validFiles.length === 0) {
         setUploadError('Please select valid image or video files (max 10MB each)');
+        toast.error('Please select valid image or video files (max 10MB each)', 'Invalid Files');
         setIsUploading(false);
         return;
       }
@@ -133,9 +136,10 @@ export function AddListingPage() {
         console.log('Server upload not available, using local previews:', uploadErr);
       }
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error processing files:', error);
       setUploadError('Failed to process files. Please try again.');
+      toast.error(getErrorMessage(error), 'Upload Failed');
     } finally {
       setIsUploading(false);
       // Reset file input
@@ -196,7 +200,7 @@ export function AddListingPage() {
         videos: videosToSave,
       });
       
-      alert('Listing created successfully!');
+      toast.success('Your property listing has been created!', 'Listing Created');
       
       // Reset form
       setStep(1);
@@ -213,10 +217,9 @@ export function AddListingPage() {
       });
       setUploadedImages([]);
       setUploadedVideos([]);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating listing:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Failed to create listing';
-      alert(`Error: ${errorMessage}`);
+      toast.error(getErrorMessage(error), 'Failed to Create Listing');
     } finally {
       setIsSubmitting(false);
     }

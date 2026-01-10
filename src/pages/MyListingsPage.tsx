@@ -242,7 +242,7 @@ export function MyListingsPage({ onNavigate }: MyListingsPageProps) {
   const handleSave = async (updatedProperty: Property) => {
     try {
       await apiClient.updateProperty(updatedProperty.id, updatedProperty);
-      setListings(prev => prev.map(p => p.id === updatedProperty.id ? updatedProperty : p));
+    setListings(prev => prev.map(p => p.id === updatedProperty.id ? updatedProperty : p));
       setEditingProperty(null);
     } catch (err) {
       console.error('Error updating listing:', err);
@@ -330,9 +330,9 @@ export function MyListingsPage({ onNavigate }: MyListingsPageProps) {
               onClick={() => onNavigate?.('add-listing')}
               className="px-6 py-3 bg-gradient-gold hover:opacity-90 text-black font-bold rounded-xl transition-all flex items-center gap-2 gold-glow"
             >
-              <Plus className="w-5 h-5" />
-              Add New Listing
-            </button>
+            <Plus className="w-5 h-5" />
+            Add New Listing
+          </button>
           </div>
         </div>
 
@@ -358,7 +358,7 @@ export function MyListingsPage({ onNavigate }: MyListingsPageProps) {
             </button>
           </motion.div>
         ) : (
-          <div className="space-y-6">
+        <div className="space-y-6">
             {listings.map((property, index) => {
               const seekers = interestedSeekers[property.id] || [];
               const isExpanded = expandedListing === property.id;
@@ -371,8 +371,8 @@ export function MyListingsPage({ onNavigate }: MyListingsPageProps) {
                   transition={{ delay: index * 0.1 }}
                   className="bg-bg-primary border border-border-color rounded-2xl overflow-hidden"
                 >
-                  <div className="flex flex-col md:flex-row">
-                    <div className="w-full md:w-64 h-48 md:h-auto relative">
+              <div className="flex flex-col md:flex-row">
+                <div className="w-full md:w-64 h-48 md:h-auto relative">
                       {property.images && property.images.length > 0 ? (
                         <img
                           src={property.images[0]}
@@ -384,22 +384,22 @@ export function MyListingsPage({ onNavigate }: MyListingsPageProps) {
                           <Home className="w-12 h-12 text-text-tertiary" />
                         </div>
                       )}
-                      <div className="absolute top-2 left-2 px-3 py-1 bg-success text-white text-xs font-bold rounded-full">
-                        Active
-                      </div>
-                    </div>
+                  <div className="absolute top-2 left-2 px-3 py-1 bg-success text-white text-xs font-bold rounded-full">
+                    Active
+                  </div>
+                </div>
 
-                    <div className="flex-1 p-6">
-                      <div className="flex justify-between items-start mb-4">
-                        <div>
-                          <h3 className="font-display text-xl font-bold text-text-primary mb-1">
-                            {property.title}
-                          </h3>
-                          <p className="text-text-secondary text-sm">
-                            {property.location}
-                          </p>
-                        </div>
-                        <div className="flex gap-2">
+                <div className="flex-1 p-6">
+                  <div className="flex justify-between items-start mb-4">
+                    <div>
+                      <h3 className="font-display text-xl font-bold text-text-primary mb-1">
+                        {property.title}
+                      </h3>
+                      <p className="text-text-secondary text-sm">
+                        {property.location}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
                           <button
                             onClick={() => toggleExpanded(property.id)}
                             className={`p-2 rounded-lg transition-colors flex items-center gap-1 ${
@@ -423,15 +423,15 @@ export function MyListingsPage({ onNavigate }: MyListingsPageProps) {
                             }`}
                             title="View Analytics"
                           >
-                            <Eye className="w-5 h-5" />
-                          </button>
+                        <Eye className="w-5 h-5" />
+                      </button>
                           <button
                             onClick={() => setEditingProperty(property)}
                             className="p-2 hover:bg-bg-tertiary text-text-tertiary rounded-lg transition-colors"
                             title="Edit Listing"
                           >
-                            <Edit className="w-5 h-5" />
-                          </button>
+                        <Edit className="w-5 h-5" />
+                      </button>
                           <button
                             onClick={() => handleDelete(property.id)}
                             disabled={isDeleting === property.id}
@@ -441,13 +441,13 @@ export function MyListingsPage({ onNavigate }: MyListingsPageProps) {
                             {isDeleting === property.id ? (
                               <Loader2 className="w-5 h-5 animate-spin" />
                             ) : (
-                              <Trash2 className="w-5 h-5" />
+                        <Trash2 className="w-5 h-5" />
                             )}
-                          </button>
-                        </div>
-                      </div>
+                      </button>
+                    </div>
+                  </div>
 
-                      <div className="flex items-center gap-6 text-sm text-text-secondary mb-4">
+                  <div className="flex items-center gap-6 text-sm text-text-secondary mb-4">
                         <span>₦{property.price?.toLocaleString() || 'N/A'}</span>
                         {property.bedrooms && <span>{property.bedrooms} Beds</span>}
                         {property.bathrooms && <span>{property.bathrooms} Baths</span>}
@@ -549,7 +549,7 @@ export function MyListingsPage({ onNavigate }: MyListingsPageProps) {
                                           </span>
                                         </div>
                                       </div>
-                                    </div>
+                      </div>
 
                                     <div className="flex items-center gap-2">
                                       {seeker.unlocked ? (
@@ -568,8 +568,8 @@ export function MyListingsPage({ onNavigate }: MyListingsPageProps) {
                                           Unlock (5 credits)
                                         </button>
                                       )}
-                                    </div>
-                                  </div>
+                </div>
+              </div>
 
                                   {/* Inspection Details */}
                                   {seeker.inspection && (
@@ -634,7 +634,7 @@ export function MyListingsPage({ onNavigate }: MyListingsPageProps) {
                 </motion.div>
               );
             })}
-          </div>
+        </div>
         )}
       </div>
 

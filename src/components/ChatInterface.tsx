@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { X, Send, Paperclip, Calendar, Home, ArrowLeft, Check, CheckCheck, Lock, Mic, Smile, MoreVertical, Phone, Video } from 'lucide-react';
 import { ChatMessage, Property, Interest } from '../types';
 import { useChat } from '../hooks/useChat';
+import { useToast, getErrorMessage } from '../contexts/ToastContext';
 
 interface ChatInterfaceProps {
   isOpen: boolean;
@@ -25,6 +26,7 @@ export function ChatInterface({
   interest,
   isFullPage = false,
 }: ChatInterfaceProps) {
+  const toast = useToast();
   const {
     activeChat,
     sendMessage,
@@ -66,7 +68,7 @@ export function ChatInterface({
       console.error('Failed to send message:', error);
       // Show the message back in input for retry
       setInputMessage(message);
-      alert(error?.message || 'Failed to send message. Please try again.');
+      toast.error(getErrorMessage(error), 'Message Failed');
     }
   };
 

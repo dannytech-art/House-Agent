@@ -1,43 +1,73 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Mail, Lock, User, Phone, Briefcase, MapPin, Loader2, AlertCircle } from 'lucide-react';
+import { X, Mail, Lock, User, Phone, Briefcase, Loader2, AlertCircle, ArrowLeft, Building2, Search } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { useFormValidation } from '../hooks/useFormValidation';
 import { UserRole } from '../types';
+import { useToast, getErrorMessage } from '../contexts/ToastContext';
+
+// Google Icon SVG
+const GoogleIcon = () => (
+  <svg className="w-5 h-5" viewBox="0 0 24 24">
+    <path
+      fill="#4285F4"
+      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+    />
+    <path
+      fill="#34A853"
+      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+    />
+    <path
+      fill="#FBBC05"
+      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+    />
+    <path
+      fill="#EA4335"
+      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+    />
+  </svg>
+);
+
 interface SignupModalProps {
   isOpen: boolean;
   onClose: () => void;
   onOpenLogin: () => void;
 }
+
 export function SignupModal({
   isOpen,
   onClose,
   onOpenLogin
 }: SignupModalProps) {
+  const toast = useToast();
   const {
     signup,
+    loginWithGoogle,
+    verifyOtp,
+    resendOtp,
     isLoading,
     error,
-    clearError
+    clearError,
+    pendingVerification
   } = useAuth();
+
   const [role, setRole] = useState<UserRole | null>(null);
   const [step, setStep] = useState(1);
-  const {
-    values,
-    errors,
-    handleChange,
-    handleSubmit
-  } = useFormValidation({
+  const [showOtpInput, setShowOtpInput] = useState(false);
+  const [otp, setOtp] = useState(['', '', '', '', '', '']);
+  const [resendTimer, setResendTimer] = useState(0);
+
+  // Memoize form config to prevent re-renders
+  const initialValues = useMemo(() => ({
     email: '',
     password: '',
     confirmPassword: '',
     fullName: '',
     phone: '',
-    licenseNumber: '',
-    specialization: 'Residential',
-    budget: '',
-    location: ''
-  }, {
+    agentType: 'semi-direct' as 'direct' | 'semi-direct',
+  }), []);
+
+  const validationRules = useMemo(() => ({
     email: {
       required: true,
       email: true
@@ -48,7 +78,7 @@ export function SignupModal({
     },
     confirmPassword: {
       required: true,
-      matches: 'password',
+      matches: 'password' as const,
       message: 'Passwords must match'
     },
     fullName: {
@@ -58,249 +88,504 @@ export function SignupModal({
       required: true,
       phone: true
     }
-  });
-  const onSubmit = async (formData: typeof values) => {
-    if (!role) return;
-    const userData = {
-      name: formData.fullName,
-      phone: formData.phone,
-      ...(role === 'agent' ? {
-        licenseNumber: formData.licenseNumber,
-        specialization: formData.specialization
-      } : {
-        budget: formData.budget,
-        preferredLocation: formData.location
-      })
-    };
-    await signup(formData.email, formData.password, role, userData);
-    if (!error) {
-      onClose();
+  }), []);
+
+  const {
+    values,
+    errors,
+    handleChange,
+    handleSubmit
+  } = useFormValidation(initialValues, validationRules);
+
+  // Handle OTP input
+  const handleOtpChange = (index: number, value: string) => {
+    if (value.length > 1) return;
+    
+    const newOtp = [...otp];
+    newOtp[index] = value;
+    setOtp(newOtp);
+    
+    // Auto-focus next input
+    if (value && index < 5) {
+      const nextInput = document.getElementById(`signup-otp-${index + 1}`);
+      nextInput?.focus();
     }
   };
+
+  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent) => {
+    if (e.key === 'Backspace' && !otp[index] && index > 0) {
+      const prevInput = document.getElementById(`signup-otp-${index - 1}`);
+      prevInput?.focus();
+    }
+  };
+
+  // Resend timer
+  useEffect(() => {
+    if (resendTimer > 0) {
+      const timer = setTimeout(() => setResendTimer(resendTimer - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [resendTimer]);
+
+  // Check if we need to show OTP input
+  useEffect(() => {
+    if (pendingVerification?.type === 'email_verification') {
+      setShowOtpInput(true);
+      setResendTimer(60);
+    }
+  }, [pendingVerification]);
+
+  const onSubmit = async (formData: typeof values) => {
+    if (!role) return;
+    
+    try {
+      const result = await signup(formData.email, formData.password, role, {
+        name: formData.fullName,
+        phone: formData.phone,
+        agentType: role === 'agent' ? formData.agentType : undefined,
+      });
+      
+      if (result.requiresVerification) {
+        setShowOtpInput(true);
+        setResendTimer(60);
+        toast.info('Please verify your email to complete registration', 'Verification Required');
+      } else {
+        toast.success('Your account has been created!', 'Welcome to Vilanow');
+        onClose();
+      }
+    } catch (err: any) {
+      toast.error(getErrorMessage(err), 'Signup Failed');
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    const otpCode = otp.join('');
+    if (otpCode.length !== 6) {
+      toast.error('Please enter the complete 6-digit code', 'Invalid Code');
+      return;
+    }
+
+    try {
+      await verifyOtp(pendingVerification?.email || values.email, otpCode, 'email_verification');
+      toast.success('Email verified! Welcome to Vilanow', 'Success');
+      onClose();
+    } catch (err: any) {
+      toast.error(getErrorMessage(err), 'Verification Failed');
+    }
+  };
+
+  const handleResendOtp = async () => {
+    try {
+      await resendOtp();
+      setResendTimer(60);
+      toast.success('New code sent to your email', 'Code Sent');
+    } catch (err: any) {
+      toast.error(getErrorMessage(err), 'Failed to Send Code');
+    }
+  };
+
+  const handleGoogleSignup = (selectedRole: 'seeker' | 'agent') => {
+    loginWithGoogle(selectedRole);
+  };
+
   useEffect(() => {
     if (!isOpen) {
       setRole(null);
       setStep(1);
+      setShowOtpInput(false);
+      setOtp(['', '', '', '', '', '']);
       clearError();
     }
   }, [isOpen, clearError]);
-  const renderRoleSelection = () => <div className="space-y-4">
-      <h3 className="text-center text-text-secondary mb-6">
-        Choose your account type
-      </h3>
-      <div className="grid grid-cols-2 gap-4">
-        <button onClick={() => {
-        setRole('seeker');
-        setStep(2);
-      }} className="p-6 rounded-xl border-2 border-border-color hover:border-primary hover:bg-primary/5 transition-all group text-center">
-          <div className="w-12 h-12 mx-auto bg-bg-tertiary rounded-full flex items-center justify-center mb-3 group-hover:bg-primary/20 transition-colors">
-            <User className="w-6 h-6 text-text-secondary group-hover:text-primary" />
-          </div>
-          <h4 className="font-bold text-text-primary mb-1">House Seeker</h4>
-          <p className="text-xs text-text-tertiary">
-            I'm looking for a property
-          </p>
-        </button>
 
-        <button onClick={() => {
-        setRole('agent');
-        setStep(2);
-      }} className="p-6 rounded-xl border-2 border-border-color hover:border-primary hover:bg-primary/5 transition-all group text-center">
-          <div className="w-12 h-12 mx-auto bg-bg-tertiary rounded-full flex items-center justify-center mb-3 group-hover:bg-primary/20 transition-colors">
-            <Briefcase className="w-6 h-6 text-text-secondary group-hover:text-primary" />
+  const renderRoleSelection = () => (
+    <div className="space-y-4">
+      <p className="text-center text-text-secondary mb-6">
+        Choose how you want to use Vilanow
+      </p>
+
+      <button
+        onClick={() => {
+          setRole('seeker');
+          setStep(2);
+        }}
+        className="w-full p-5 rounded-xl border-2 border-border-color hover:border-primary hover:bg-primary/5 transition-all group"
+      >
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 bg-bg-tertiary rounded-xl flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+            <Search className="w-7 h-7 text-text-secondary group-hover:text-primary" />
           </div>
-          <h4 className="font-bold text-text-primary mb-1">Agent</h4>
-          <p className="text-xs text-text-tertiary">I'm listing properties</p>
+          <div className="text-left">
+            <h4 className="font-bold text-text-primary text-lg">I'm Looking for a Home</h4>
+            <p className="text-sm text-text-tertiary">
+              Find your dream property from verified agents
+            </p>
+          </div>
+        </div>
+      </button>
+
+      <button
+        onClick={() => {
+          setRole('agent');
+          setStep(2);
+        }}
+        className="w-full p-5 rounded-xl border-2 border-border-color hover:border-primary hover:bg-primary/5 transition-all group"
+      >
+        <div className="flex items-center gap-4">
+          <div className="w-14 h-14 bg-bg-tertiary rounded-xl flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+            <Building2 className="w-7 h-7 text-text-secondary group-hover:text-primary" />
+          </div>
+          <div className="text-left">
+            <h4 className="font-bold text-text-primary text-lg">I'm a Property Agent</h4>
+            <p className="text-sm text-text-tertiary">
+              List properties and connect with buyers
+            </p>
+          </div>
+        </div>
+      </button>
+
+      {/* Google Signup Options */}
+      <div className="flex items-center gap-4 my-6">
+        <div className="flex-1 h-px bg-border-color" />
+        <span className="text-text-tertiary text-sm">or continue with</span>
+        <div className="flex-1 h-px bg-border-color" />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <button
+          onClick={() => handleGoogleSignup('seeker')}
+          className="py-3 bg-white hover:bg-gray-50 text-gray-800 font-medium rounded-xl transition-all flex items-center justify-center gap-2 border border-gray-200 text-sm"
+        >
+          <GoogleIcon />
+          Seeker
+        </button>
+        <button
+          onClick={() => handleGoogleSignup('agent')}
+          className="py-3 bg-white hover:bg-gray-50 text-gray-800 font-medium rounded-xl transition-all flex items-center justify-center gap-2 border border-gray-200 text-sm"
+        >
+          <GoogleIcon />
+          Agent
         </button>
       </div>
-    </div>;
-  const renderForm = () => <form onSubmit={e => {
-    e.preventDefault();
-    handleSubmit(onSubmit);
-  }} className="space-y-4">
-      <div className="grid grid-cols-2 gap-4">
+
+      <p className="text-center text-text-secondary mt-6">
+        Already have an account?{' '}
+        <button
+          onClick={onOpenLogin}
+          className="text-primary hover:underline font-semibold"
+        >
+          Sign In
+        </button>
+      </p>
+    </div>
+  );
+
+  const renderSignupForm = () => (
+    <>
+      {/* Google Sign Up */}
+      <button
+        onClick={() => handleGoogleSignup(role!)}
+        className="w-full py-3 bg-white hover:bg-gray-50 text-gray-800 font-medium rounded-xl transition-all flex items-center justify-center gap-3 border border-gray-200 mb-4"
+      >
+        <GoogleIcon />
+        Continue with Google
+      </button>
+
+      {/* Divider */}
+      <div className="flex items-center gap-4 my-5">
+        <div className="flex-1 h-px bg-border-color" />
+        <span className="text-text-tertiary text-sm">or</span>
+        <div className="flex-1 h-px bg-border-color" />
+      </div>
+
+      {error && (
+        <div className="mb-4 flex items-center gap-2 text-danger text-sm bg-danger/10 p-3 rounded-lg">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          {error}
+        </div>
+      )}
+
+      <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
         <div>
-          <label className="block text-xs font-medium text-text-secondary mb-1">
+          <label className="block text-sm font-medium text-text-secondary mb-1.5">
             Full Name
           </label>
-          <input type="text" value={values.fullName} onChange={e => handleChange('fullName', e.target.value)} className={`w-full px-3 py-2 bg-bg-tertiary border rounded-lg text-text-primary text-sm focus:outline-none transition-all ${errors.fullName ? 'border-danger' : 'border-border-color focus:border-primary'}`} />
-          {errors.fullName && <p className="text-xs text-danger mt-1">{errors.fullName}</p>}
+          <div className="relative">
+            <User className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-tertiary" />
+            <input
+              type="text"
+              value={values.fullName}
+              onChange={(e) => handleChange('fullName', e.target.value)}
+              placeholder="Enter your full name"
+              className="w-full pl-10 pr-4 py-3 bg-bg-tertiary border border-border-color rounded-xl focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors text-text-primary placeholder:text-text-tertiary"
+            />
+          </div>
+          {errors.fullName && (
+            <p className="text-danger text-xs mt-1">{errors.fullName}</p>
+          )}
         </div>
+
         <div>
-          <label className="block text-xs font-medium text-text-secondary mb-1">
-            Phone
+          <label className="block text-sm font-medium text-text-secondary mb-1.5">
+            Email Address
           </label>
-          <input type="tel" value={values.phone} onChange={e => handleChange('phone', e.target.value)} className={`w-full px-3 py-2 bg-bg-tertiary border rounded-lg text-text-primary text-sm focus:outline-none transition-all ${errors.phone ? 'border-danger' : 'border-border-color focus:border-primary'}`} />
-          {errors.phone && <p className="text-xs text-danger mt-1">{errors.phone}</p>}
+          <div className="relative">
+            <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-tertiary" />
+            <input
+              type="email"
+              value={values.email}
+              onChange={(e) => handleChange('email', e.target.value)}
+              placeholder="Enter your email"
+              className="w-full pl-10 pr-4 py-3 bg-bg-tertiary border border-border-color rounded-xl focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors text-text-primary placeholder:text-text-tertiary"
+            />
+          </div>
+          {errors.email && (
+            <p className="text-danger text-xs mt-1">{errors.email}</p>
+          )}
         </div>
-      </div>
 
-      <div>
-        <label className="block text-xs font-medium text-text-secondary mb-1">
-          Email Address
-        </label>
-        <input type="email" value={values.email} onChange={e => handleChange('email', e.target.value)} className={`w-full px-3 py-2 bg-bg-tertiary border rounded-lg text-text-primary text-sm focus:outline-none transition-all ${errors.email ? 'border-danger' : 'border-border-color focus:border-primary'}`} />
-        {errors.email && <p className="text-xs text-danger mt-1">{errors.email}</p>}
-      </div>
-
-      <div className="grid grid-cols-2 gap-4">
         <div>
-          <label className="block text-xs font-medium text-text-secondary mb-1">
+          <label className="block text-sm font-medium text-text-secondary mb-1.5">
+            Phone Number
+          </label>
+          <div className="relative">
+            <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-tertiary" />
+            <input
+              type="tel"
+              value={values.phone}
+              onChange={(e) => handleChange('phone', e.target.value)}
+              placeholder="+234 800 000 0000"
+              className="w-full pl-10 pr-4 py-3 bg-bg-tertiary border border-border-color rounded-xl focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors text-text-primary placeholder:text-text-tertiary"
+            />
+          </div>
+          {errors.phone && (
+            <p className="text-danger text-xs mt-1">{errors.phone}</p>
+          )}
+        </div>
+
+        {role === 'agent' && (
+          <div>
+            <label className="block text-sm font-medium text-text-secondary mb-1.5">
+              Agent Type
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => handleChange('agentType', 'direct')}
+                className={`p-3 rounded-xl border-2 text-center transition-all ${
+                  values.agentType === 'direct'
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border-color text-text-secondary hover:border-primary/50'
+                }`}
+              >
+                <Briefcase className="w-5 h-5 mx-auto mb-1" />
+                <p className="font-medium text-sm">Direct Agent</p>
+                <p className="text-xs text-text-tertiary">Property owner</p>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleChange('agentType', 'semi-direct')}
+                className={`p-3 rounded-xl border-2 text-center transition-all ${
+                  values.agentType === 'semi-direct'
+                    ? 'border-primary bg-primary/10 text-primary'
+                    : 'border-border-color text-text-secondary hover:border-primary/50'
+                }`}
+              >
+                <Building2 className="w-5 h-5 mx-auto mb-1" />
+                <p className="font-medium text-sm">Semi-Direct</p>
+                <p className="text-xs text-text-tertiary">Agency rep</p>
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div>
+          <label className="block text-sm font-medium text-text-secondary mb-1.5">
             Password
           </label>
-          <input type="password" value={values.password} onChange={e => handleChange('password', e.target.value)} className={`w-full px-3 py-2 bg-bg-tertiary border rounded-lg text-text-primary text-sm focus:outline-none transition-all ${errors.password ? 'border-danger' : 'border-border-color focus:border-primary'}`} />
-          {errors.password && <p className="text-xs text-danger mt-1">{errors.password}</p>}
+          <div className="relative">
+            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-tertiary" />
+            <input
+              type="password"
+              value={values.password}
+              onChange={(e) => handleChange('password', e.target.value)}
+              placeholder="Create a password"
+              className="w-full pl-10 pr-4 py-3 bg-bg-tertiary border border-border-color rounded-xl focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors text-text-primary placeholder:text-text-tertiary"
+            />
+          </div>
+          {errors.password && (
+            <p className="text-danger text-xs mt-1">{errors.password}</p>
+          )}
         </div>
+
         <div>
-          <label className="block text-xs font-medium text-text-secondary mb-1">
-            Confirm
+          <label className="block text-sm font-medium text-text-secondary mb-1.5">
+            Confirm Password
           </label>
-          <input type="password" value={values.confirmPassword} onChange={e => handleChange('confirmPassword', e.target.value)} className={`w-full px-3 py-2 bg-bg-tertiary border rounded-lg text-text-primary text-sm focus:outline-none transition-all ${errors.confirmPassword ? 'border-danger' : 'border-border-color focus:border-primary'}`} />
-          {errors.confirmPassword && <p className="text-xs text-danger mt-1">{errors.confirmPassword}</p>}
+          <div className="relative">
+            <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-text-tertiary" />
+            <input
+              type="password"
+              value={values.confirmPassword}
+              onChange={(e) => handleChange('confirmPassword', e.target.value)}
+              placeholder="Confirm your password"
+              className="w-full pl-10 pr-4 py-3 bg-bg-tertiary border border-border-color rounded-xl focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors text-text-primary placeholder:text-text-tertiary"
+            />
+          </div>
+          {errors.confirmPassword && (
+            <p className="text-danger text-xs mt-1">{errors.confirmPassword}</p>
+          )}
         </div>
+
+        <button
+          type="submit"
+          disabled={isLoading}
+          className="w-full py-3 bg-gradient-gold hover:opacity-90 text-black font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        >
+          {isLoading ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              Creating Account...
+            </>
+          ) : (
+            'Create Account'
+          )}
+        </button>
+      </form>
+
+      <p className="text-center text-text-secondary mt-4 text-sm">
+        By signing up, you agree to our{' '}
+        <a href="/terms" className="text-primary hover:underline">Terms</a>
+        {' '}and{' '}
+        <a href="/privacy" className="text-primary hover:underline">Privacy Policy</a>
+      </p>
+    </>
+  );
+
+  const renderOtpVerification = () => (
+    <div className="space-y-6">
+      <p className="text-center text-text-secondary">
+        We sent a verification code to<br />
+        <span className="font-semibold text-text-primary">
+          {pendingVerification?.email || values.email}
+        </span>
+      </p>
+
+      {/* OTP Input */}
+      <div className="flex justify-center gap-2">
+        {otp.map((digit, index) => (
+          <input
+            key={index}
+            id={`signup-otp-${index}`}
+            type="text"
+            inputMode="numeric"
+            maxLength={1}
+            value={digit}
+            onChange={(e) => handleOtpChange(index, e.target.value.replace(/\D/g, ''))}
+            onKeyDown={(e) => handleOtpKeyDown(index, e)}
+            className="w-12 h-14 text-center text-xl font-bold bg-bg-tertiary border border-border-color rounded-xl focus:border-primary focus:ring-1 focus:ring-primary outline-none transition-colors text-text-primary"
+          />
+        ))}
       </div>
 
-      {role === 'agent' ? <div className="pt-2 border-t border-border-color">
-          <p className="text-xs font-bold text-primary mb-3">Agent Details</p>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1">
-                License (Optional)
-              </label>
-              <input type="text" value={values.licenseNumber} onChange={e => handleChange('licenseNumber', e.target.value)} className="w-full px-3 py-2 bg-bg-tertiary border border-border-color rounded-lg text-text-primary text-sm focus:outline-none focus:border-primary" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1">
-                Specialization
-              </label>
-              <select value={values.specialization} onChange={e => handleChange('specialization', e.target.value)} className="w-full px-3 py-2 bg-bg-tertiary border border-border-color rounded-lg text-text-primary text-sm focus:outline-none focus:border-primary">
-                <option>Residential</option>
-                <option>Commercial</option>
-                <option>Land</option>
-              </select>
-            </div>
-          </div>
-        </div> : <div className="pt-2 border-t border-border-color">
-          <p className="text-xs font-bold text-primary mb-3">Preferences</p>
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1">
-                Preferred Location
-              </label>
-              <select value={values.location} onChange={e => handleChange('location', e.target.value)} className="w-full px-3 py-2 bg-bg-tertiary border border-border-color rounded-lg text-text-primary text-sm focus:outline-none focus:border-primary">
-                <option value="">Select location</option>
-                <option value="Lekki">Lekki</option>
-                <option value="Ikate">Ikate</option>
-                <option value="Ajah">Ajah</option>
-                <option value="Victoria Island">Victoria Island</option>
-                <option value="Ikoyi">Ikoyi</option>
-                <option value="Yaba">Yaba</option>
-                <option value="Surulere">Surulere</option>
-                <option value="Ikeja">Ikeja</option>
-                <option value="Maryland">Maryland</option>
-                <option value="Gbagada">Gbagada</option>
-                <option value="Lekki Phase 1">Lekki Phase 1</option>
-                <option value="Lekki Phase 2">Lekki Phase 2</option>
-                <option value="Banana Island">Banana Island</option>
-                <option value="Sangotedo">Sangotedo</option>
-                <option value="Chevron">Chevron</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-text-secondary mb-1">
-                Max Budget
-              </label>
-              <select value={values.budget} onChange={e => handleChange('budget', e.target.value)} className="w-full px-3 py-2 bg-bg-tertiary border border-border-color rounded-lg text-text-primary text-sm focus:outline-none focus:border-primary">
-                <option value="">Select budget</option>
-                <option value="20000000">Up to ₦20M</option>
-                <option value="30000000">Up to ₦30M</option>
-                <option value="50000000">Up to ₦50M</option>
-                <option value="70000000">Up to ₦70M</option>
-                <option value="100000000">Up to ₦100M</option>
-                <option value="150000000">Up to ₦150M</option>
-                <option value="200000000">Up to ₦200M</option>
-                <option value="300000000">Up to ₦300M</option>
-                <option value="500000000">Up to ₦500M</option>
-                <option value="1000000000">₦500M+</option>
-              </select>
-            </div>
-          </div>
-        </div>}
+      {error && (
+        <div className="flex items-center gap-2 text-danger text-sm bg-danger/10 p-3 rounded-lg">
+          <AlertCircle className="w-4 h-4" />
+          {error}
+        </div>
+      )}
 
-      <div className="pt-2">
-        <label className="flex items-start gap-2 cursor-pointer">
-          <input type="checkbox" required className="mt-1 w-3 h-3 text-primary rounded border-border-color focus:ring-primary" />
-          <span className="text-xs text-text-secondary">
-            I agree to the{' '}
-            <span className="text-primary underline">Terms of Service</span> and{' '}
-            <span className="text-primary underline">Privacy Policy</span>
+      <button
+        onClick={handleVerifyOtp}
+        disabled={isLoading || otp.join('').length !== 6}
+        className="w-full py-3 bg-gradient-gold hover:opacity-90 text-black font-bold rounded-xl transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+      >
+        {isLoading ? (
+          <Loader2 className="w-5 h-5 animate-spin" />
+        ) : (
+          'Verify Email'
+        )}
+      </button>
+
+      <p className="text-center text-sm text-text-tertiary">
+        Didn't receive the code?{' '}
+        {resendTimer > 0 ? (
+          <span className="text-text-secondary">
+            Resend in {resendTimer}s
           </span>
-        </label>
-      </div>
+        ) : (
+          <button
+            onClick={handleResendOtp}
+            className="text-primary hover:underline font-medium"
+          >
+            Resend Code
+          </button>
+        )}
+      </p>
+    </div>
+  );
 
-      <div className="flex gap-3 pt-2">
-        <button type="button" onClick={() => setStep(1)} className="flex-1 py-3 bg-bg-tertiary hover:bg-bg-primary border border-border-color text-text-primary font-semibold rounded-xl transition-colors">
-          Back
-        </button>
-        <button type="submit" disabled={isLoading} className="flex-[2] py-3 bg-gradient-gold hover:opacity-90 text-black font-bold rounded-xl transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed">
-          {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Create Account'}
-        </button>
-      </div>
-    </form>;
-  return <AnimatePresence>
-      {isOpen && <>
-          <motion.div initial={{
-        opacity: 0
-      }} animate={{
-        opacity: 1
-      }} exit={{
-        opacity: 0
-      }} onClick={onClose} className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60]" />
-          <motion.div initial={{
-        opacity: 0,
-        scale: 0.95,
-        y: 20
-      }} animate={{
-        opacity: 1,
-        scale: 1,
-        y: 0
-      }} exit={{
-        opacity: 0,
-        scale: 0.95,
-        y: 20
-      }} className="fixed inset-0 z-[70] flex items-center justify-center p-4 pointer-events-none">
-            <div className="bg-bg-secondary w-full max-w-lg rounded-2xl border border-primary/30 shadow-2xl overflow-hidden pointer-events-auto gold-glow max-h-[90vh] overflow-y-auto">
+  return (
+    <AnimatePresence>
+      {isOpen && (
+        <>
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={onClose}
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60]"
+          />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.95, y: 20 }}
+            className="fixed inset-0 z-[70] flex items-center justify-center p-4 pointer-events-none"
+          >
+            <div className="bg-bg-secondary w-full max-w-md rounded-2xl border border-primary/30 shadow-2xl overflow-hidden pointer-events-auto gold-glow max-h-[90vh] overflow-y-auto">
               <div className="p-6">
+                {/* Header */}
                 <div className="flex justify-between items-center mb-6">
+                  {(step > 1 || showOtpInput) && (
+                    <button
+                      onClick={() => {
+                        if (showOtpInput) {
+                          setShowOtpInput(false);
+                        } else {
+                          setStep(1);
+                          setRole(null);
+                        }
+                      }}
+                      className="p-2 hover:bg-bg-tertiary rounded-full transition-colors"
+                    >
+                      <ArrowLeft className="w-5 h-5 text-text-tertiary" />
+                    </button>
+                  )}
+                  {step === 1 && !showOtpInput && <div />}
                   <h2 className="font-display text-2xl font-bold text-text-primary">
-                    {step === 1 ? 'Join Vilanow' : `Sign up as ${role === 'agent' ? 'Agent' : 'Seeker'}`}
+                    {showOtpInput 
+                      ? 'Verify Email' 
+                      : step === 1 
+                        ? 'Get Started' 
+                        : `Join as ${role === 'agent' ? 'Agent' : 'Seeker'}`
+                    }
                   </h2>
                   <button onClick={onClose} className="p-2 hover:bg-bg-tertiary rounded-full transition-colors">
                     <X className="w-5 h-5 text-text-tertiary" />
                   </button>
                 </div>
 
-                {error && <div className="mb-6 p-4 bg-danger/10 border border-danger/20 rounded-xl flex items-start gap-3">
-                    <AlertCircle className="w-5 h-5 text-danger flex-shrink-0 mt-0.5" />
-                    <p className="text-sm text-danger">{error}</p>
-                  </div>}
-
-                {step === 1 ? renderRoleSelection() : renderForm()}
-
-                <div className="mt-6 text-center border-t border-border-color pt-4">
-                  <p className="text-text-secondary text-sm">
-                    Already have an account?{' '}
-                    <button onClick={() => {
-                  onClose();
-                  onOpenLogin();
-                }} className="text-primary font-bold hover:underline">
-                      Sign In
-                    </button>
-                  </p>
-                </div>
+                {showOtpInput 
+                  ? renderOtpVerification()
+                  : step === 1 
+                    ? renderRoleSelection() 
+                    : renderSignupForm()
+                }
               </div>
             </div>
           </motion.div>
-        </>}
-    </AnimatePresence>;
+        </>
+      )}
+    </AnimatePresence>
+  );
 }

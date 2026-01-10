@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { ArrowLeft, MapPin, Bed, Bath, Square, Heart, Share2, Calendar, CheckCircle, Star, MessageSquare, Loader2, Clock, ChevronLeft, ChevronRight, X, LogIn } from 'lucide-react';
 import { Property } from '../types';
 import apiClient from '../lib/api-client';
+import { useToast, getErrorMessage } from '../contexts/ToastContext';
 
 interface PropertyDetailsPageProps {
   property: Property;
@@ -17,6 +18,7 @@ export function PropertyDetailsPage({
   onExpressInterest,
   onLoginRequired
 }: PropertyDetailsPageProps) {
+  const toast = useToast();
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [isSaved, setIsSaved] = useState(false);
   const [showInterestModal, setShowInterestModal] = useState(false);
@@ -105,22 +107,30 @@ export function PropertyDetailsPage({
       // If date and time selected, also schedule inspection
       if (selectedDate && selectedTime && newInterestId) {
         const dateStr = selectedDate.toISOString().split('T')[0];
-        await apiClient.scheduleInspection({
-          interestId: newInterestId,
-          scheduledDate: dateStr,
-          scheduledTime: selectedTime,
-          notes: inspectionNotes,
-        });
-        setSuccessMessage('Interest expressed and inspection scheduled! The agent will be notified.');
+        try {
+          await apiClient.scheduleInspection({
+            interestId: newInterestId,
+            scheduledDate: dateStr,
+            scheduledTime: selectedTime,
+            notes: inspectionNotes,
+          });
+          setSuccessMessage('Interest expressed and inspection scheduled! The agent will be notified.');
+          toast.success('Interest expressed and inspection scheduled!', 'Success');
+        } catch (inspectionErr: any) {
+          // Interest was created but inspection failed
+          toast.warning(getErrorMessage(inspectionErr), 'Inspection Scheduling Failed');
+          setSuccessMessage('Interest expressed! However, the inspection could not be scheduled.');
+        }
       } else {
         setSuccessMessage('Interest expressed successfully! The agent will be notified.');
+        toast.success('Interest expressed successfully!', 'Success');
       }
       
       setShowInterestModal(false);
       onExpressInterest();
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error expressing interest:', err);
-      alert('Failed to express interest. Please try again.');
+      toast.error(getErrorMessage(err), 'Error');
     } finally {
       setIsSubmitting(false);
     }

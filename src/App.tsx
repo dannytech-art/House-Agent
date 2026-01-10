@@ -24,6 +24,7 @@ import { ResetPasswordPage } from './pages/ResetPasswordPage';
 import { SeekerRequestsPage } from './pages/SeekerRequestsPage';
 import { SwipePage } from './pages/SwipePage';
 import { PaymentCallbackPage } from './pages/PaymentCallbackPage';
+import { AuthCallbackPage } from './pages/AuthCallbackPage';
 import { TermsPage } from './pages/TermsPage';
 import { PrivacyPage } from './pages/PrivacyPage';
 import { HelpPage } from './pages/HelpPage';
@@ -34,6 +35,7 @@ import { SignupModal } from './components/SignupModal';
 import { ForgotPasswordModal } from './components/ForgotPasswordModal';
 import { NotificationToast } from './components/NotificationToast';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { ToastProvider } from './contexts/ToastContext';
 import { useAuth } from './hooks/useAuth';
 import { useRealTime } from './hooks/useRealTime';
 import { useSearch } from './hooks/useSearch';
@@ -153,6 +155,12 @@ function AppContent() {
       }
     }, 150);
   };
+  // Handle auth callback from OAuth
+  const handleAuthSuccess = (userData: any, token: string) => {
+    // Auth state is already updated by the callback page
+    setCurrentPage('dashboard');
+  };
+
   const renderPage = () => {
     const path = window.location.pathname;
     if (path === '/reset-password') return <ResetPasswordPage />;
@@ -160,6 +168,7 @@ function AppContent() {
     if (path === '/privacy') return <PrivacyPage />;
     if (path === '/help') return <HelpPage />;
     if (path === '/payment/callback') return <PaymentCallbackPage onNavigate={handleNavigate} />;
+    if (path === '/auth/callback') return <AuthCallbackPage onNavigate={handleNavigate} onAuthSuccess={handleAuthSuccess} />;
     if (path === '/admin' || currentPage === 'admin') {
       if (!isAdmin) {
         return <ErrorPage />;
@@ -181,7 +190,7 @@ function AppContent() {
             // Interest successfully expressed
           }}
           onLoginRequired={() => {
-            setShowLoginModal(true);
+            openLogin();
           }}
         /> : null;
       case 'public-agent-profile':
@@ -256,7 +265,11 @@ function AppContent() {
     </div>;
 }
 export function App() {
-  return <Router>
-      <AppContent />
-    </Router>;
+  return (
+    <ToastProvider>
+      <Router>
+        <AppContent />
+      </Router>
+    </ToastProvider>
+  );
 }

@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
 import { CheckCircle, XCircle, Loader2, ArrowLeft } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { apiClient } from '../lib/api-client';
 
 export function PaymentCallbackPage({ onNavigate }: { onNavigate: (page: string) => void }) {
+  const navigate = useNavigate();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [message, setMessage] = useState('Verifying your payment...');
   const [newBalance, setNewBalance] = useState<number | null>(null);
@@ -87,7 +89,12 @@ export function PaymentCallbackPage({ onNavigate }: { onNavigate: (page: string)
               </p>
             )}
             <button
-              onClick={() => onNavigate('wallet')}
+              onClick={() => {
+                // Clear the URL params and navigate back
+                navigate('/', { replace: true });
+                // Then trigger internal navigation
+                setTimeout(() => onNavigate('wallet'), 100);
+              }}
               className="w-full py-3 bg-gradient-gold hover:opacity-90 text-black font-bold rounded-xl transition-all"
             >
               Go to Wallet
@@ -106,14 +113,20 @@ export function PaymentCallbackPage({ onNavigate }: { onNavigate: (page: string)
             <p className="text-text-secondary mb-6">{message}</p>
             <div className="flex gap-3">
               <button
-                onClick={() => onNavigate('wallet')}
+                onClick={() => {
+                  navigate('/', { replace: true });
+                  setTimeout(() => onNavigate('wallet'), 100);
+                }}
                 className="flex-1 py-3 bg-bg-tertiary hover:bg-bg-primary text-text-primary font-medium rounded-xl transition-colors flex items-center justify-center gap-2"
               >
                 <ArrowLeft className="w-4 h-4" />
                 Go Back
               </button>
               <button
-                onClick={() => onNavigate('wallet')}
+                onClick={() => {
+                  navigate('/', { replace: true });
+                  setTimeout(() => onNavigate('wallet'), 100);
+                }}
                 className="flex-1 py-3 bg-primary hover:bg-primary/90 text-black font-bold rounded-xl transition-colors"
               >
                 Try Again
@@ -125,4 +138,5 @@ export function PaymentCallbackPage({ onNavigate }: { onNavigate: (page: string)
     </div>
   );
 }
+
 

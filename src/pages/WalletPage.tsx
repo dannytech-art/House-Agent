@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
-import { Wallet, TrendingUp, Plus, History, Loader2 } from 'lucide-react';
+import { Wallet, TrendingUp, Plus, History, Loader2, RefreshCw } from 'lucide-react';
 import { CreditBundle } from '../components/CreditBundle';
 import { PaymentModal } from '../components/PaymentModal';
 import { PaymentHistory } from '../components/PaymentHistory';
 import { useAuth } from '../hooks/useAuth';
 import { apiClient } from '../lib/api-client';
 import { CreditBundle as CreditBundleType, Transaction } from '../types';
+import { useToast, getErrorMessage } from '../contexts/ToastContext';
 
 // Default bundles if API fails
 const DEFAULT_BUNDLES: CreditBundleType[] = [
@@ -17,9 +18,8 @@ const DEFAULT_BUNDLES: CreditBundleType[] = [
 ];
 
 export function WalletPage() {
-  const {
-    user
-  } = useAuth();
+  const { user } = useAuth();
+  const toast = useToast();
   const [balance, setBalance] = useState(0);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedBundle, setSelectedBundle] = useState<CreditBundleType | null>(null);
@@ -27,32 +27,43 @@ export function WalletPage() {
   const [bundles, setBundles] = useState<CreditBundleType[]>(DEFAULT_BUNDLES);
   const [loading, setLoading] = useState(true);
 
-  // Load balance and bundles
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        const [balanceData, bundlesData, transactionsData] = await Promise.all([
-          apiClient.getCreditBalance().catch(() => ({ credits: 0 })),
-          apiClient.getCreditBundles().catch(() => null),
-          apiClient.getTransactions().catch(() => []),
-        ]);
-        
-        setBalance(balanceData?.credits || balanceData?.balance || 0);
-        // Only update bundles if API returned data
-        if (bundlesData && Array.isArray(bundlesData) && bundlesData.length > 0) {
-          setBundles(bundlesData);
-        }
-        setTransactions(transactionsData || []);
-      } catch (error) {
-        console.error('Error loading wallet data:', error);
-        // Keep default bundles
-      } finally {
-        setLoading(false);
+  // Refresh function to reload wallet data
+  const refreshData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [balanceData, bundlesData, transactionsData] = await Promise.all([
+        apiClient.getCreditBalance().catch((err) => {
+          console.error('Failed to fetch balance:', err);
+          return { credits: 0 };
+        }),
+        apiClient.getCreditBundles().catch((err) => {
+          console.error('Failed to fetch bundles:', err);
+          return null;
+        }),
+        apiClient.getTransactions().catch((err) => {
+          console.error('Failed to fetch transactions:', err);
+          return [];
+        }),
+      ]);
+      
+      setBalance(balanceData?.credits || balanceData?.balance || 0);
+      // Only update bundles if API returned data
+      if (bundlesData && Array.isArray(bundlesData) && bundlesData.length > 0) {
+        setBundles(bundlesData);
       }
-    };
-    
-    loadData();
-  }, [user]);
+      setTransactions(transactionsData || []);
+    } catch (error: any) {
+      console.error('Error loading wallet data:', error);
+      toast.error(getErrorMessage(error), 'Failed to load wallet');
+    } finally {
+      setLoading(false);
+    }
+  }, [toast]);
+
+  // Load balance and bundles on mount
+  useEffect(() => {
+    refreshData();
+  }, [refreshData, user]);
 
   const handleBuyCredits = (bundle: CreditBundleType) => {
     setSelectedBundle(bundle);
@@ -60,22 +71,14 @@ export function WalletPage() {
   };
 
   const handlePaymentSuccess = async (reference: string) => {
-    try {
-      // Payment was already verified in PaymentModal, just refresh data
-      const [balanceData, transactionsData] = await Promise.all([
-        apiClient.getCreditBalance().catch(() => null),
-        apiClient.getTransactions().catch(() => []),
-      ]);
-      
-      if (balanceData) {
-        setBalance(balanceData.credits || balanceData.balance || 0);
-      }
-      setTransactions(transactionsData || []);
-    } catch (error) {
-      console.error('Error refreshing data after payment:', error);
-      // Suggest refresh
-      alert('Payment successful! Please refresh to see updated balance.');
-    }
+    // Refresh data after successful payment
+    await refreshData();
+  };
+
+  const handleNavigateToWallet = () => {
+    // Already on wallet page, just refresh data and close modal
+    setShowPaymentModal(false);
+    refreshData();
   };
   return <div className="min-h-screen bg-bg-secondary pb-24">
       <div className="max-w-4xl mx-auto px-4 py-6">
@@ -154,6 +157,12 @@ export function WalletPage() {
         <PaymentHistory transactions={transactions} />
       </div>
 
-      <PaymentModal isOpen={showPaymentModal} onClose={() => setShowPaymentModal(false)} bundle={selectedBundle} onSuccess={handlePaymentSuccess} />
+      <PaymentModal 
+        isOpen={showPaymentModal} 
+        onClose={() => setShowPaymentModal(false)} 
+        bundle={selectedBundle} 
+        onSuccess={handlePaymentSuccess}
+        onNavigateToWallet={handleNavigateToWallet}
+      />
     </div>;
 }

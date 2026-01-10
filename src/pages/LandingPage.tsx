@@ -121,7 +121,7 @@ export function LandingPage({
             duration: 0.8
           }} className="flex flex-col sm:flex-row items-center justify-center gap-4 mt-8">
               <button onClick={onOpenSignupModal} className="px-8 py-4 bg-gradient-gold hover:opacity-90 text-black font-semibold rounded-xl transition-all gold-glow">
-                Find a Home
+                Get Started
               </button>
               <button onClick={onOpenLoginModal} className="px-8 py-4 bg-transparent border-2 border-primary/50 hover:border-primary text-text-primary rounded-xl font-semibold transition-all hover:gold-glow">
                 Sign In

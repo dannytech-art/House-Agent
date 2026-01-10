@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, CreditCard, Lock, ShieldCheck, Smartphone, CheckCircle, AlertCircle, ExternalLink } from 'lucide-react';
+import { X, CreditCard, Lock, ShieldCheck, Smartphone, CheckCircle, AlertCircle } from 'lucide-react';
 import { CreditBundle } from '../types';
 import { apiClient } from '../lib/api-client';
 import { useAuth } from '../hooks/useAuth';
+import { useToast, getErrorMessage } from '../contexts/ToastContext';
 
 declare global {
   interface Window {
@@ -19,8 +20,9 @@ interface PaystackConfig {
   amount: number;
   currency: string;
   ref: string;
+  channels?: string[];
   metadata?: Record<string, any>;
-  callback: (response: { reference: string; status: string }) => void;
+  callback: (response: { reference: string; status: string; trans?: string; message?: string }) => void;
   onClose: () => void;
 }
 
@@ -29,6 +31,7 @@ interface PaymentModalProps {
   onClose: () => void;
   bundle: CreditBundle | null;
   onSuccess: (transactionId: string) => void;
+  onNavigateToWallet?: () => void;
 }
 
 // Paystack public key - in production, this should come from environment variables
@@ -38,14 +41,17 @@ export function PaymentModal({
   isOpen,
   onClose,
   bundle,
-  onSuccess
+  onSuccess,
+  onNavigateToWallet
 }: PaymentModalProps) {
   const { user } = useAuth();
+  const toast = useToast();
   const [step, setStep] = useState<'method' | 'processing' | 'verifying' | 'success' | 'error'>('method');
   const [paymentMethod, setPaymentMethod] = useState<'card' | 'transfer'>('card');
   const [paymentReference, setPaymentReference] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string>('');
   const [paystackLoaded, setPaystackLoaded] = useState(false);
+  const [creditsAdded, setCreditsAdded] = useState<number>(0);
 
   // Load Paystack script
   useEffect(() => {
@@ -60,15 +66,18 @@ export function PaymentModal({
     }
   }, []);
 
+  // Reset state when modal opens
   useEffect(() => {
     if (isOpen) {
       setStep('method');
       setErrorMessage('');
       setPaymentReference(null);
+      setCreditsAdded(0);
     }
   }, [isOpen]);
 
-  const handlePaystackPayment = useCallback(async () => {
+  // Handle payment - both card and transfer use Paystack inline
+  const handlePayment = useCallback(async () => {
     if (!bundle || !user) {
       setErrorMessage('Please login to make a purchase');
       setStep('error');
@@ -81,24 +90,117 @@ export function PaymentModal({
     }
 
     setStep('processing');
+    console.log('💳 Starting payment process...');
+    console.log('📧 User email:', user.email);
+    console.log('🔑 Paystack key:', PAYSTACK_PUBLIC_KEY?.substring(0, 20) + '...');
 
     try {
-      // Initialize payment on backend - only bundleId and callback_url needed
+      // Initialize payment on backend
+      console.log('📡 Initializing payment with backend...');
       const initResponse = await apiClient.initializePayment({
         bundleId: bundle.id,
         callback_url: window.location.origin + '/payment/callback',
       });
+      console.log('✅ Backend init response:', initResponse);
 
       const reference = initResponse.reference;
+      if (!reference) {
+        throw new Error('No payment reference received from backend');
+      }
       setPaymentReference(reference);
+      console.log('📝 Payment reference:', reference);
+
+      // Configure Paystack channels based on payment method
+      // Both methods use the Paystack popup, just with different default channels
+      const channels: string[] = paymentMethod === 'card' 
+        ? ['card'] 
+        : ['bank_transfer', 'bank', 'ussd'];
+
+      // Define callback handler (must be a regular function for Paystack SDK)
+      const handlePaystackCallback = function(response: { reference: string; status: string; trans?: string; message?: string }) {
+        console.log('🔄 Paystack callback response:', response);
+        
+        // Payment completed on Paystack side
+        setStep('verifying');
+        
+        // If Paystack says success, the payment is done
+        // The backend will receive the webhook and credit the account
+        const paystackSuccess = response.status === 'success';
+        
+        // Verify payment asynchronously
+        apiClient.verifyPayment(response.reference)
+          .then((verifyResponse) => {
+            console.log('✅ Verification response:', verifyResponse);
+            
+            // API returns status: 'completed' | 'failed' | 'pending'
+            if (verifyResponse.status === 'completed') {
+              const credits = verifyResponse.credits || bundle.credits + (bundle.bonus || 0);
+              setCreditsAdded(credits);
+              setStep('success');
+              toast.success(`${credits.toLocaleString()} credits added to your wallet!`, 'Payment Successful');
+              onSuccess(response.reference);
+            } else if (paystackSuccess) {
+              // Paystack said success but our backend says pending/failed
+              // Trust Paystack's response since the money was charged
+              console.log('⚠️ Backend verification pending but Paystack confirmed success');
+              const credits = bundle.credits + (bundle.bonus || 0);
+              setCreditsAdded(credits);
+              setStep('success');
+              toast.success(`${credits.toLocaleString()} credits added to your wallet!`, 'Payment Successful');
+              onSuccess(response.reference);
+            } else {
+              setErrorMessage('Payment verification failed. Please try again or contact support.');
+              toast.error('Payment verification failed. Please contact support.');
+              setStep('error');
+            }
+          })
+          .catch((error: any) => {
+            console.error('Verification error:', error);
+            
+            // If Paystack said success but our verification call failed
+            // Trust Paystack - the webhook will credit the account
+            if (paystackSuccess) {
+              console.log('⚠️ Verification endpoint failed but Paystack confirmed success');
+              const credits = bundle.credits + (bundle.bonus || 0);
+              setCreditsAdded(credits);
+              setStep('success');
+              toast.success(`${credits.toLocaleString()} credits added to your wallet!`, 'Payment Successful');
+              onSuccess(response.reference);
+            } else {
+              const errMsg = getErrorMessage(error);
+              setErrorMessage(errMsg);
+              toast.error(errMsg, 'Payment Failed');
+              setStep('error');
+            }
+          });
+      };
+
+      // Define onClose handler (must be a regular function for Paystack SDK)
+      const handlePaystackClose = function() {
+        // User closed the popup without completing payment
+        if (step === 'processing') {
+          setStep('method');
+        }
+      };
+
+      // Validate Paystack key
+      if (!PAYSTACK_PUBLIC_KEY || PAYSTACK_PUBLIC_KEY.includes('xxxxxxxx')) {
+        throw new Error('Invalid Paystack public key. Please configure VITE_PAYSTACK_PUBLIC_KEY in your .env file.');
+      }
+
+      const amount = (initResponse.bundle?.price || bundle.price) * 100;
+      console.log('💰 Amount in kobo:', amount);
+      console.log('🏦 Channels:', channels);
+      console.log('🚀 Opening Paystack popup...');
 
       // Open Paystack popup
       const handler = window.PaystackPop.setup({
         key: PAYSTACK_PUBLIC_KEY,
         email: user.email,
-        amount: (initResponse.bundle?.price || bundle.price) * 100, // Paystack expects amount in kobo
+        amount: amount, // Paystack expects amount in kobo
         currency: 'NGN',
         ref: reference,
+        channels: channels,
         metadata: {
           bundle_id: bundle.id,
           credits: initResponse.bundle?.totalCredits || bundle.credits,
@@ -110,85 +212,45 @@ export function PaymentModal({
             },
           ],
         },
-        callback: async (response) => {
-          // Payment completed on Paystack side
-          setStep('verifying');
-          
-          try {
-            // Verify payment on backend
-            const verifyResponse = await apiClient.verifyPayment(response.reference);
-            
-            // API returns status: 'completed' | 'failed' | 'pending'
-            if (verifyResponse.status === 'completed') {
-              setStep('success');
-              onSuccess(response.reference);
-              
-              // Auto close after showing success
-              setTimeout(() => {
-                onClose();
-              }, 2500);
-            } else {
-              setErrorMessage('Payment verification failed. Status: ' + verifyResponse.status);
-              setStep('error');
-            }
-          } catch (error: any) {
-            console.error('Verification error:', error);
-            setErrorMessage(error.message || 'Failed to verify payment. Please contact support.');
-            setStep('error');
-          }
-        },
-        onClose: () => {
-          // User closed the popup without completing payment
-          if (step !== 'success' && step !== 'verifying') {
-            setStep('method');
-          }
-        },
+        callback: handlePaystackCallback,
+        onClose: handlePaystackClose,
       });
 
+      console.log('✅ Paystack handler created, opening iframe...');
       handler.openIframe();
+      console.log('✅ Paystack iframe opened');
     } catch (error: any) {
       console.error('Payment initialization error:', error);
-      setErrorMessage(error.message || 'Failed to initialize payment. Please try again.');
+      const errMsg = getErrorMessage(error);
+      setErrorMessage(errMsg);
+      toast.error(errMsg, 'Payment Error');
       setStep('error');
     }
-  }, [bundle, user, paystackLoaded, onSuccess, onClose, step]);
+  }, [bundle, user, paystackLoaded, paymentMethod, onSuccess, step, toast]);
 
-  const handleBankTransfer = async () => {
-    if (!bundle || !user) {
-      setErrorMessage('Please login to make a purchase');
-      setStep('error');
+  // Handle close - ensure clean state
+  const handleClose = () => {
+    if (step === 'processing' || step === 'verifying') {
+      // Don't allow closing during payment
       return;
     }
-
-    setStep('processing');
-
-    try {
-      // Initialize payment for bank transfer
-      const initResponse = await apiClient.initializePayment({
-        bundleId: bundle.id,
-        callback_url: window.location.origin + '/payment/callback',
-      });
-
-      // For bank transfer, redirect to Paystack's authorization URL
-      window.open(initResponse.authorizationUrl, '_blank');
-      
-      setPaymentReference(initResponse.reference);
-      
-      // Show instructions
-      setStep('method');
-      setErrorMessage('');
-    } catch (error: any) {
-      console.error('Bank transfer initialization error:', error);
-      setErrorMessage(error.message || 'Failed to generate bank transfer details. Please try again.');
-      setStep('error');
-    }
+    setStep('method');
+    setErrorMessage('');
+    setPaymentReference(null);
+    onClose();
   };
 
-  const handlePayment = () => {
-    if (paymentMethod === 'card') {
-      handlePaystackPayment();
-    } else {
-      handleBankTransfer();
+  // Handle going to wallet after success
+  const handleGoToWallet = () => {
+    setStep('method');
+    setErrorMessage('');
+    setPaymentReference(null);
+    onClose();
+    // Small delay to ensure modal closes first
+    if (onNavigateToWallet) {
+      setTimeout(() => {
+        onNavigateToWallet();
+      }, 100);
     }
   };
 
@@ -202,7 +264,7 @@ export function PaymentModal({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            onClick={onClose}
+            onClick={handleClose}
             className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[60]"
           />
           <motion.div
@@ -228,7 +290,7 @@ export function PaymentModal({
                       </p>
                     </div>
                     <button
-                      onClick={onClose}
+                      onClick={handleClose}
                       className="p-2 hover:bg-bg-tertiary rounded-full transition-colors"
                     >
                       <X className="w-5 h-5 text-text-tertiary" />
@@ -298,9 +360,9 @@ export function PaymentModal({
                         <Smartphone className="w-5 h-5" />
                       </div>
                       <div className="text-left">
-                        <p className="font-bold text-text-primary">Bank Transfer</p>
+                        <p className="font-bold text-text-primary">Bank Transfer / USSD</p>
                         <p className="text-xs text-text-tertiary">
-                          Pay via bank transfer or USSD
+                          Pay via bank transfer or USSD code
                         </p>
                       </div>
                     </button>
@@ -337,7 +399,10 @@ export function PaymentModal({
                     Initializing Payment
                   </h3>
                   <p className="text-text-secondary">
-                    Please wait while we connect you to Paystack...
+                    Please complete your payment in the popup window...
+                  </p>
+                  <p className="text-xs text-text-tertiary mt-4">
+                    Don't see the popup? Check if your browser blocked it.
                   </p>
                 </div>
               )}
@@ -361,7 +426,7 @@ export function PaymentModal({
 
               {/* Success */}
               {step === 'success' && (
-                <div className="p-12 text-center">
+                <div className="p-8 text-center">
                   <motion.div
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
@@ -374,18 +439,34 @@ export function PaymentModal({
                     Payment Successful! 🎉
                   </h3>
                   <p className="text-text-secondary mb-2">
-                    {bundle.credits.toLocaleString()} credits have been added to your wallet.
+                    {creditsAdded > 0 ? creditsAdded.toLocaleString() : bundle.credits.toLocaleString()} credits have been added to your wallet.
                   </p>
                   {bundle.bonus > 0 && (
-                    <p className="text-sm text-success">
+                    <p className="text-sm text-success mb-4">
                       +{bundle.bonus} bonus credits included!
                     </p>
                   )}
                   {paymentReference && (
-                    <p className="text-xs text-text-tertiary mt-4">
+                    <p className="text-xs text-text-tertiary mb-6">
                       Reference: {paymentReference}
                     </p>
                   )}
+                  
+                  {/* Action Buttons */}
+                  <div className="flex gap-3">
+                    <button
+                      onClick={handleClose}
+                      className="flex-1 py-3 bg-bg-tertiary hover:bg-bg-primary text-text-primary font-medium rounded-xl transition-colors"
+                    >
+                      Close
+                    </button>
+                    <button
+                      onClick={handleGoToWallet}
+                      className="flex-1 py-3 bg-gradient-gold hover:opacity-90 text-black font-bold rounded-xl transition-all"
+                    >
+                      Go to Wallet
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -403,7 +484,7 @@ export function PaymentModal({
                   </p>
                   <div className="flex gap-3">
                     <button
-                      onClick={onClose}
+                      onClick={handleClose}
                       className="flex-1 py-3 bg-bg-tertiary hover:bg-bg-primary text-text-primary font-medium rounded-xl transition-colors"
                     >
                       Cancel

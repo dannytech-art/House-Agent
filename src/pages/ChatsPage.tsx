@@ -4,8 +4,10 @@ import { ChatInterface } from '../components/ChatInterface';
 import { useChat } from '../hooks/useChat';
 import { MessageCircle, Loader2, RefreshCw } from 'lucide-react';
 import { motion } from 'framer-motion';
+import { useToast } from '../contexts/ToastContext';
 
 export function ChatsPage() {
+  const toast = useToast();
   const {
     chats,
     activeChatId,
@@ -15,6 +17,13 @@ export function ChatsPage() {
     error,
     refreshChats,
   } = useChat();
+
+  // Show toast when error occurs
+  useEffect(() => {
+    if (error) {
+      toast.error(error, 'Chat Error');
+    }
+  }, [error, toast]);
 
   // Get participant info for the active chat
   const getParticipant = () => {

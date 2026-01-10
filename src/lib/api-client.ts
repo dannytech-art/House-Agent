@@ -1,8 +1,8 @@
 // API Client for frontend
 // Connects to the Express backend server
 
-// Default to hosted backend, allow override via VITE_API_URL
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'https://house-agent-backend-mfx5.onrender.com/api';
+// Default to local backend for development, override via VITE_API_URL
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
 
 interface RequestOptions extends RequestInit {
   params?: Record<string, string | number | boolean>;
@@ -176,15 +176,29 @@ class ApiClient {
     phone: string;
     role: 'seeker' | 'agent' | 'admin';
     agentType?: 'direct' | 'semi-direct';
-  }) {
-    return this.request<{ user: any; token: string }>('/auth/register', {
+  }): Promise<{
+    user: any;
+    requiresVerification?: boolean;
+    token?: string;
+  }> {
+    return this.request('/auth/register', {
       method: 'POST',
       body: JSON.stringify(userData),
     });
   }
 
-  async login(email: string, password: string) {
-    const response = await this.request<{ user: any; token: string }>('/auth/login', {
+  async login(email: string, password: string): Promise<{
+    user: any;
+    token?: string;
+    requiresVerification?: boolean;
+    email?: string;
+  }> {
+    const response = await this.request<{
+      user: any;
+      token?: string;
+      requiresVerification?: boolean;
+      email?: string;
+    }>('/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password }),
     });
@@ -194,6 +208,43 @@ class ApiClient {
     }
     
     return response;
+  }
+
+  // Send OTP for email verification or password reset
+  async sendOtp(email: string, type: 'email_verification' | 'password_reset' = 'email_verification') {
+    return this.request<{ message: string }>('/auth/send-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email, type }),
+    });
+  }
+
+  // Verify OTP
+  async verifyOtp(email: string, otp: string, type: 'email_verification' | 'password_reset' = 'email_verification'): Promise<{
+    user?: any;
+    token?: string;
+    resetToken?: string;
+    expiresAt?: string;
+  }> {
+    const response = await this.request<{
+      user?: any;
+      token?: string;
+      resetToken?: string;
+      expiresAt?: string;
+    }>('/auth/verify-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email, otp, type }),
+    });
+    
+    if (response.token) {
+      this.setToken(response.token);
+    }
+    
+    return response;
+  }
+
+  // Get Google OAuth URL
+  getGoogleAuthUrl(role: 'seeker' | 'agent' = 'seeker'): string {
+    return `${this.baseUrl}/auth/google?role=${role}`;
   }
 
   async logout() {
@@ -209,17 +260,20 @@ class ApiClient {
     return this.request('/auth/me');
   }
 
-  async requestPasswordReset(email: string) {
-    return this.request('/auth/password-reset', {
-      method: 'POST',
-      body: JSON.stringify({ email }),
-    });
+  async getAuthStatus(): Promise<{ authenticated: boolean; user?: any }> {
+    return this.request('/auth/status');
   }
 
-  async resetPassword(token: string, newPassword: string) {
-    return this.request('/auth/password-reset', {
-      method: 'PATCH',
-      body: JSON.stringify({ token, newPassword }),
+  // Request password reset (sends OTP)
+  async requestPasswordReset(email: string) {
+    return this.sendOtp(email, 'password_reset');
+  }
+
+  // Complete password reset with reset token
+  async resetPassword(resetToken: string, newPassword: string) {
+    return this.request('/auth/password-reset/complete', {
+      method: 'POST',
+      body: JSON.stringify({ resetToken, newPassword }),
     });
   }
 
