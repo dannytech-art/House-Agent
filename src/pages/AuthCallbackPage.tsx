@@ -57,17 +57,17 @@ export function AuthCallbackPage({ onNavigate, onAuthSuccess }: AuthCallbackPage
           // Show success toast only once
           toast.success(`Welcome to Vilanow!`, 'Login Successful');
           
-          // Notify parent of successful auth
+          // Notify parent of successful auth - this sets auth state and currentPage to 'dashboard'
           onAuthSuccess(user, token);
           
           console.log('🔍 User data:', user);
+          console.log('🚀 Navigating to dashboard...');
           
-          // Update state first
+          // Update URL without reloading the page
+          window.history.replaceState({}, '', '/');
+          
+          // Force navigation to dashboard
           onNavigate('dashboard');
-          
-          // Redirect IMMEDIATELY to home page
-          console.log('🚀 Redirecting to home page...');
-          window.location.replace('/');  // Use replace instead of href to avoid history entry
         } catch (err: any) {
           console.error('Auth callback error:', err);
           const errMsg = err.message || 'Failed to complete authentication';
