@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { Loader2, CheckCircle, AlertCircle } from 'lucide-react';
-import { apiClient } from '../lib/api-client';
+import apiClient from '../lib/api-client';
 import { useToast } from '../contexts/ToastContext';
 
 interface AuthCallbackPageProps {
@@ -15,17 +15,34 @@ export function AuthCallbackPage({ onNavigate, onAuthSuccess }: AuthCallbackPage
   const toast = useToast();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [errorMessage, setErrorMessage] = useState('');
+  
+  // Prevent infinite loops - only process once
+  const hasProcessed = useRef(false);
 
   useEffect(() => {
+    // If already processed, don't do anything
+    if (hasProcessed.current) {
+      return;
+    }
+
     const handleCallback = async () => {
+      // Mark as processed immediately
+      hasProcessed.current = true;
+
       const token = searchParams.get('token');
       const role = searchParams.get('role');
       const error = searchParams.get('error');
 
       if (error) {
-        setErrorMessage(decodeURIComponent(error));
+        const decodedError = decodeURIComponent(error);
+        setErrorMessage(decodedError);
         setStatus('error');
-        toast.error(decodeURIComponent(error), 'Authentication Failed');
+        toast.error(decodedError, 'Authentication Failed');
+        
+        // Redirect to landing page after 3 seconds
+        setTimeout(() => {
+          onNavigate('landing');
+        }, 3000);
         return;
       }
 
@@ -38,30 +55,54 @@ export function AuthCallbackPage({ onNavigate, onAuthSuccess }: AuthCallbackPage
           const user = await apiClient.getCurrentUser();
           
           setStatus('success');
-          toast.success('Welcome to Vilanow!', 'Login Successful');
+          
+          // Show success toast only once
+          toast.success(`Welcome to Vilanow!`, 'Login Successful');
           
           // Notify parent of successful auth
           onAuthSuccess(user, token);
           
-          // Navigate to dashboard after a short delay
+          // Redirect based on role after 1.5 seconds
           setTimeout(() => {
-            onNavigate('dashboard');
+            if (user.role === 'agent') {
+              // Check if agent needs KYC
+              if (user.kycStatus === 'unverified') {
+                onNavigate('kyc-onboarding');
+              } else {
+                onNavigate('dashboard');
+              }
+            } else {
+              // Seeker goes to dashboard
+              onNavigate('dashboard');
+            }
           }, 1500);
         } catch (err: any) {
           console.error('Auth callback error:', err);
-          setErrorMessage(err.message || 'Failed to complete authentication');
+          const errMsg = err.message || 'Failed to complete authentication';
+          setErrorMessage(errMsg);
           setStatus('error');
-          toast.error('Failed to complete authentication', 'Error');
+          toast.error(errMsg, 'Authentication Failed');
+          
+          // Redirect to landing after 3 seconds
+          setTimeout(() => {
+            onNavigate('landing');
+          }, 3000);
         }
       } else {
-        setErrorMessage('No authentication token received');
+        const errMsg = 'No authentication token received';
+        setErrorMessage(errMsg);
         setStatus('error');
-        toast.error('No authentication token received', 'Error');
+        toast.error(errMsg, 'Authentication Failed');
+        
+        // Redirect to landing after 3 seconds
+        setTimeout(() => {
+          onNavigate('landing');
+        }, 3000);
       }
     };
 
     handleCallback();
-  }, [searchParams, onNavigate, onAuthSuccess, toast]);
+  }, [searchParams, toast, onNavigate, onAuthSuccess]); // Include all dependencies
 
   return (
     <div className="min-h-screen bg-bg-primary flex items-center justify-center p-4">
@@ -98,7 +139,7 @@ export function AuthCallbackPage({ onNavigate, onAuthSuccess }: AuthCallbackPage
               Welcome to Vilanow! 🎉
             </h2>
             <p className="text-text-secondary">
-              Redirecting you to your dashboard...
+              Redirecting you now...
             </p>
           </>
         )}
@@ -126,4 +167,3 @@ export function AuthCallbackPage({ onNavigate, onAuthSuccess }: AuthCallbackPage
     </div>
   );
 }
-

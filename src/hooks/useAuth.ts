@@ -202,6 +202,9 @@ export function useAuth() {
       const response = await apiClient.verifyOtp(email, otp, type);
       
       if (type === 'email_verification' && response.user && response.token) {
+        // Store the token first
+        apiClient.setToken(response.token);
+        
         // Email verified - user is now logged in
         setUser(response.user);
         setIsAuthenticated(true);
@@ -316,6 +319,21 @@ export function useAuth() {
     }
   };
 
+  // Refresh user data from the API
+  const refreshUser = async () => {
+    try {
+      const token = apiClient.getToken();
+      if (!token) return;
+      
+      const userData = await apiClient.getCurrentUser();
+      setUser(userData as User | Agent);
+      localStorage.setItem('vilanow_user', JSON.stringify(userData));
+      emitAuth({ user: userData as User | Agent });
+    } catch (err) {
+      console.error('Failed to refresh user:', err);
+    }
+  };
+
   const isAgent = user?.role === 'agent';
   const needsKYC = isAgent && (user as Agent).kycStatus === 'unverified';
 
@@ -329,6 +347,7 @@ export function useAuth() {
     signup,
     logout,
     updateUser,
+    refreshUser,
     // OTP verification
     sendOtp,
     verifyOtp,

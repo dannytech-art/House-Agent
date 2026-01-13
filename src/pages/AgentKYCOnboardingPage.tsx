@@ -4,14 +4,15 @@ import { Shield, User, Briefcase, Camera, CheckCircle, ChevronRight, ChevronLeft
 import { useAuth } from '../hooks/useAuth';
 export function AgentKYCOnboardingPage() {
   const {
+    user,
     updateUser
   } = useAuth();
   const [step, setStep] = useState(1);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formData, setFormData] = useState({
-    fullName: 'Adebayo Williams',
-    phone: '+234 803 123 4567',
-    email: 'adebayo@vilanow.com',
+    fullName: user?.name || '',
+    phone: user?.phone || '',
+    email: user?.email || '',
     licenseNumber: '',
     experience: '',
     specialization: 'Residential',

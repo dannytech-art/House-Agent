@@ -46,7 +46,8 @@ function AppContent() {
     user,
     isAuthenticated,
     isAgent,
-    needsKYC
+    needsKYC,
+    setAuthFromCallback
   } = useAuth();
   const isAdmin = user?.role === 'admin';
   const isSeeker = user?.role === 'seeker';
@@ -157,7 +158,8 @@ function AppContent() {
   };
   // Handle auth callback from OAuth
   const handleAuthSuccess = (userData: any, token: string) => {
-    // Auth state is already updated by the callback page
+    // Update auth state with the received user data
+    setAuthFromCallback(userData, token);
     setCurrentPage('dashboard');
   };
 
@@ -259,8 +261,8 @@ function AppContent() {
 
       <NotificationToast notifications={notifications} onDismiss={markAsRead} />
 
-      <LoginModal isOpen={showLogin} onClose={closeAll} onOpenSignup={openSignup} onOpenForgotPassword={openForgot} />
-      <SignupModal isOpen={showSignup} onClose={closeAll} onOpenLogin={openLogin} />
+      <LoginModal isOpen={showLogin} onClose={closeAll} onOpenSignup={openSignup} onLoginSuccess={() => setCurrentPage('dashboard')} />
+      <SignupModal isOpen={showSignup} onClose={closeAll} onOpenLogin={openLogin} onSignupSuccess={() => setCurrentPage('dashboard')} />
       <ForgotPasswordModal isOpen={showForgot} onClose={closeAll} onOpenLogin={openLogin} />
     </div>;
 }
