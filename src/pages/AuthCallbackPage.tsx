@@ -54,28 +54,20 @@ export function AuthCallbackPage({ onNavigate, onAuthSuccess }: AuthCallbackPage
           // Fetch user data
           const user = await apiClient.getCurrentUser();
           
-          setStatus('success');
-          
           // Show success toast only once
           toast.success(`Welcome to Vilanow!`, 'Login Successful');
           
           // Notify parent of successful auth
           onAuthSuccess(user, token);
           
-          // Redirect based on role after 1.5 seconds
-          setTimeout(() => {
-            if (user.role === 'agent') {
-              // Check if agent needs KYC
-              if (user.kycStatus === 'unverified') {
-                onNavigate('kyc-onboarding');
-              } else {
-                onNavigate('dashboard');
-              }
-            } else {
-              // Seeker goes to dashboard
-              onNavigate('dashboard');
-            }
-          }, 1500);
+          console.log('🔍 User data:', user);
+          
+          // Update state first
+          onNavigate('dashboard');
+          
+          // Redirect IMMEDIATELY to home page
+          console.log('🚀 Redirecting to home page...');
+          window.location.replace('/');  // Use replace instead of href to avoid history entry
         } catch (err: any) {
           console.error('Auth callback error:', err);
           const errMsg = err.message || 'Failed to complete authentication';
