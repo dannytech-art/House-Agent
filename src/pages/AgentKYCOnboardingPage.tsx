@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Shield, User, Briefcase, Camera, CheckCircle, ChevronRight, ChevronLeft, AlertCircle, Upload } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 export function AgentKYCOnboardingPage() {
+  const navigate = useNavigate();
   const {
     user,
     updateUser
@@ -27,22 +29,32 @@ export function AgentKYCOnboardingPage() {
   };
   const handleSubmit = async () => {
     setIsSubmitting(true);
-    // Simulate API call
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    updateUser({
-      kycStatus: 'verified',
-      verified: true
-    });
-    // Redirect happens automatically via App.tsx logic or we can force reload
-    window.location.href = '/';
+    try {
+      // Simulate API call
+      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Wait for updateUser to complete before redirecting
+      await updateUser({
+        kycStatus: 'verified',
+        verified: true
+      });
+      // Redirect to dashboard after successful update
+      navigate('/dashboard', { replace: true });
+    } catch (error) {
+      console.error('Failed to verify:', error);
+      setIsSubmitting(false);
+    }
   };
-  const handleSkip = () => {
+  const handleSkip = async () => {
     const confirmed = window.confirm('Are you sure? Unverified agents have limited visibility and cannot claim territories.');
     if (confirmed) {
-      updateUser({
-        kycStatus: 'pending'
-      });
-      window.location.href = '/';
+      try {
+        await updateUser({
+          kycStatus: 'pending'
+        });
+        navigate('/dashboard', { replace: true });
+      } catch (error) {
+        console.error('Failed to skip KYC:', error);
+      }
     }
   };
   return <div className="min-h-screen bg-bg-primary flex flex-col items-center justify-center p-4">
