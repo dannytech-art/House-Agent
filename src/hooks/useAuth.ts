@@ -302,20 +302,28 @@ export function useAuth() {
   };
 
   const updateUser = async (updates: Partial<User | Agent>) => {
-    if (!user) return;
+    if (!user) throw new Error('No user to update');
 
     try {
       const updatedUser = await apiClient.updateUser(user.id, updates) as Partial<User | Agent>;
       const mergedUser: User | Agent = { ...user, ...(updatedUser || {}) } as User | Agent;
       setUser(mergedUser);
       localStorage.setItem('vilanow_user', JSON.stringify(mergedUser));
-      emitAuth({ user: mergedUser });
+      emitAuth({ user: mergedUser, isAuthenticated: true, error: null });
+      return mergedUser;
     } catch (err) {
-      console.error('Failed to update user:', err);
+      console.error('Failed to update user on server:', err);
+      // Optimistically update local state even if API fails
+      // This is important for offline-first behavior
       const updated: User | Agent = { ...user, ...updates } as User | Agent;
       setUser(updated);
       localStorage.setItem('vilanow_user', JSON.stringify(updated));
-      emitAuth({ user: updated });
+      emitAuth({ user: updated, isAuthenticated: true, error: null });
+      
+      // Don't throw - the local update was successful
+      // The caller can proceed knowing the local state is updated
+      // The server will catch up when synced
+      return updated;
     }
   };
 

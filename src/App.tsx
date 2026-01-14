@@ -84,12 +84,14 @@ function AppContent() {
       setCurrentPage('landing');
     }
   }, [isAuthenticated, currentPage]);
-  // Redirect to KYC if needed
+  // Redirect to KYC if needed - only redirect to KYC when transitioning from login/signup
+  // NOT from dashboard (to prevent loops after user navigates from KYC to dashboard)
   useEffect(() => {
-    if (needsKYC && currentPage !== 'kyc-onboarding') {
+    if (needsKYC && currentPage === 'landing' && isAuthenticated) {
+      // New agent logged in from landing, send to KYC
       setCurrentPage('kyc-onboarding');
     }
-  }, [needsKYC, currentPage]);
+  }, [needsKYC, isAuthenticated]);
   const handleSearch = (query: string) => {
     search(query);
     setCurrentPage('search');
@@ -229,7 +231,7 @@ function AppContent() {
       case 'territories':
         return <TerritoriesPage />;
       case 'kyc-onboarding':
-        return <AgentKYCOnboardingPage />;
+        return <AgentKYCOnboardingPage onNavigate={handleNavigate} />;
       case 'leaderboard':
         return <LeaderboardPage />;
       case 'requests':
